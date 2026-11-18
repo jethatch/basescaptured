@@ -1,0 +1,16 @@
+# Raw Retrosheet downloads and intermediate per-PA data (rebuilt by the pipeline)
+data/raw/
+data/interim/
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS / editor
+.DS_Store
+
+# Private working notes (not published)
+SPEC.md
+DATA.md
