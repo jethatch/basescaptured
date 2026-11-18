@@ -458,6 +458,8 @@ def write_index(teams):
         nd = 0 if k in ('plus', 'opsplus', 'hr', 'rbi', 're24') else 3
         domains[k] = [round(lo - span * 0.03, nd), round(hi + span * 0.03, nd)]
 
+    write_alltime(careers)
+
     index = dict(seasons=seasons, domains=domains, qual_pa_per_game=QUAL_PA_PER_GAME, faint_min_pa=FAINT_MIN_PA,
                  teams={t: teams.get(t, [t, t]) for t in sorted(used)}, career_fields=CAREER_FIELDS)
     with open(OUT / 'index.json', 'w') as f:
@@ -474,6 +476,53 @@ def write_index(teams):
             json.dump(players, f, separators=(',', ':'))
     for stale in ('seasons.json', 'teams.json'):
         (OUT / stale).unlink(missing_ok=True)
+
+
+ALLTIME_KEYS = ('cap', 'plus', 'own', 'run')
+ALLTIME_TOP = 100
+CAREER_MIN_PA = 3000
+
+
+def write_alltime(careers):
+    """Top single seasons (qualified) and top careers (3,000+ PA) in each chart measure -> alltime.json."""
+    seasons = {k: [] for k in ALLTIME_KEYS}
+    car = {k: [] for k in ALLTIME_KEYS}
+    for pid, c in careers.items():
+        rows = [dict(zip(CAREER_FIELDS, x)) for x in c['s']]
+        qual = [r for r in rows if r['rank_cap'] is not None]
+        for r in qual:
+            m = measures(r)
+            for k in ALLTIME_KEYS:
+                seasons[k].append((m[k], [pid, c['n'], c['m'], r['year'], r['teams'], r['pa'], r[f'rank_{k}']]))
+        pa = sum(r['pa'] for r in rows)
+        if pa < CAREER_MIN_PA:
+            continue
+        tot = {f: sum(r[f] for r in rows) for f in ('cap', 'poss', 'bat_cap', 'run_cap', 'run_poss', 'exp', 'pa')}
+        vals = dict(cap=tot['cap'] / tot['poss'], own=tot['bat_cap'] / (4 * tot['pa']),
+                    run=tot['run_cap'] / tot['run_poss'] if tot['run_poss'] else 0.0,
+                    plus=100 * tot['cap'] / tot['exp'] if tot['exp'] else 0.0)
+        teams = []
+        for r in rows:
+            for t in r['teams'].split('/'):
+                if t not in teams:
+                    teams.append(t)
+        for k in ALLTIME_KEYS:
+            best = max(qual or rows, key=lambda r: measures(r)[k])
+            car[k].append((vals[k], [pid, c['n'], c['m'], rows[0]['year'], rows[-1]['year'], pa, '/'.join(teams), best['year']]))
+
+    def top(items, nd):
+        items.sort(key=lambda x: -x[0])
+        return [[round(v, nd)] + rest for v, rest in items[:ALLTIME_TOP]]
+
+    out = dict(
+        season_fields=['value', 'id', 'name', 'mlbam', 'year', 'teams', 'pa', 'rank'],
+        career_fields=['value', 'id', 'name', 'mlbam', 'first', 'last', 'pa', 'teams', 'best_year'],
+        career_min_pa=CAREER_MIN_PA,
+        seasons={k: top(v, 1 if k == 'plus' else 4) for k, v in seasons.items()},
+        careers={k: top(v, 1 if k == 'plus' else 4) for k, v in car.items()},
+    )
+    with open(OUT / 'alltime.json', 'w') as f:
+        json.dump(out, f, separators=(',', ':'))
 
 
 def main():

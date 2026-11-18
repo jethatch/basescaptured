@@ -53,7 +53,7 @@ export class Panel {
       <div class="panel-head">
         <img src="${headshot(career.mlbam, 120)}" alt="">
         <div class="panel-name"><strong>${esc(career.name)}</strong>
-          <span>${s ? `${esc(teamsText(index, s.teams))} · ${year} · ${s.pa} PA` : `Didn’t bat in ${year}`}</span></div>
+          <span>${s ? `${esc(teamsText(index, s.teams, year))} · ${year} · ${s.pa} PA` : `Didn’t bat in ${year}`}</span></div>
         <button class="btn btn-icon" type="button" data-close aria-label="Close player panel">×</button>
       </div>`;
 
@@ -188,15 +188,15 @@ function fullCareer(index, career, metric, leagueBy) {
       <span>${num(tot.cap)} of ${num(tot.poss)} bases · ${num(tot.pa)} PA · league ${fmt(lgCap)} in his years${tot.exp ? ` · Captured+ ${Math.round((100 * tot.cap) / tot.exp)}` : ''}</span>
       <span>Bases lost ${num(tot.lost)} · ${num(tot.gdp)} double plays</span></div>
     ${best.length ? `<div><span class="panel-label">Best seasons, ${label}</span><ol class="best">
-      ${best.map((x) => `<li><span><strong>${x.year}</strong> ${esc(teamsText(index, x.teams))}${strikeShort[x.year] ? ` <small>(${strikeShort[x.year]})</small>` : ''}</span>
+      ${best.map((x) => `<li><span><strong>${x.year}</strong> ${esc(teamsText(index, x.teams, x.year))}${strikeShort[x.year] ? ` <small>(${strikeShort[x.year]})</small>` : ''}</span>
         <span><strong>${fmtv(metric, x.m[metric])}</strong>${short(x)}</span></li>`).join('')}</ol></div>` : ''}
     <div><span class="panel-label">Rank in ${label}, each season</span><div class="ranks">${ranks}</div></div>
     <div><span class="panel-label">Teams</span><p>${esc(teamSpans(index, s))}</p></div>
   </div>`;
 }
 
-function teamsText(index, codes) {
-  return codes.split('/').map((c) => teamName(index, c)).join(' / ');
+function teamsText(index, codes, year) {
+  return codes.split('/').map((c) => teamName(index, c, year)).join(' / ');
 }
 
 function teamSpans(index, seasons) {
@@ -208,7 +208,7 @@ function teamSpans(index, seasons) {
       else spans.push({ code, from: x.year, to: x.year });
     }
   }
-  return spans.map((sp) => `${teamName(index, sp.code)} ${sp.from === sp.to ? sp.from : `${sp.from}–${sp.to}`}`).join(' · ');
+  return spans.map((sp) => `${teamName(index, sp.code, sp.to)} ${sp.from === sp.to ? sp.from : `${sp.from}–${sp.to}`}`).join(' · ');
 }
 
 function esc(s) {

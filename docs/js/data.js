@@ -147,13 +147,20 @@ export function headshot(mlbam, width = 96) {
 }
 export { SILHOUETTE };
 
-export function teamName(index, code) {
+// Retrosheet keeps one code through some renames; name those by season
+const RENAMED = {
+  CLE: (y) => (y < 2022 ? 'Indians' : 'Guardians'),
+  TBA: (y) => (y < 2008 ? 'Devil Rays' : 'Rays'),
+};
+
+export function teamName(index, code, year) {
+  if (RENAMED[code] && year) return RENAMED[code](year);
   const t = index.teams[code];
   return t ? t[1] : code;
 }
 
-export function teamNames(index, codes) {
-  return codes.split('/').map((c) => teamName(index, c)).join(' / ');
+export function teamNames(index, codes, year) {
+  return codes.split('/').map((c) => teamName(index, c, year)).join(' / ');
 }
 
 export async function loadIndex() {
@@ -169,7 +176,7 @@ export async function loadSeason(index, year) {
     r.m = measures(r);
     r.qualified = r.pa >= qualPa;
     r.faintOk = r.pa >= index.faint_min_pa && !r.pitcher; // pitchers batting stay off the chart
-    r.team = teamNames(index, r.teams);
+    r.team = teamNames(index, r.teams, year);
     r.t = traditional(r, meta.league);
     return r;
   });

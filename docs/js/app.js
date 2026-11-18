@@ -2,6 +2,7 @@ import { METRICS, METRIC, CHART_METRICS, COMPARE, COMPARE_BY, val, fmt, fmtv, or
 import { Swarm } from './chart.js';
 import { Board } from './table.js';
 import { Panel } from './panel.js';
+import { AllTime } from './alltime.js';
 
 const $ = (id) => document.getElementById(id);
 const TOP_FACES = 5;
@@ -13,6 +14,7 @@ const state = {
   sortKey: 'cap',
   faint: false,
   compare: '',
+  view: 'season',
   selected: null,
   kept: new Set(),
   playing: false,
@@ -48,6 +50,13 @@ async function init() {
   cmp.addEventListener('change', () => {
     state.compare = cmp.value;
     if (!state.compare && COMPARE_BY[state.sortKey]) state.sortKey = state.metric;
+    render();
+  });
+  alltime = new AllTime($('alltime'), { onPick: (id, year) => goTo(id, year) });
+  $('tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-view]');
+    if (!b) return;
+    state.view = b.dataset.view;
     render();
   });
   $('disagree').addEventListener('click', (e) => {
@@ -96,6 +105,7 @@ async function init() {
 let swarm;
 let board;
 let panel;
+let alltime;
 
 function buildMetrics() {
   const box = $('metrics');
@@ -175,6 +185,12 @@ async function render() {
   }
   showDisagreements(s, metric, cmpKey);
   board.render({ rows: s.rows, ranks: seasonRanks(s, state.sortKey), sortKey: state.sortKey, selected: state.selected, faint: state.faint, compare: cmpKey });
+  const seasonView = state.view === 'season';
+  for (const b of document.querySelectorAll('#tabs [data-view]')) b.setAttribute('aria-selected', b.dataset.view === state.view);
+  $('season-table').hidden = !seasonView;
+  if (!seasonView) $('more').hidden = true;
+  $('alltime').hidden = seasonView;
+  if (!seasonView) alltime.render({ index, view: state.view, metric, selected: state.selected });
   fillNames(s.rows);
 
   if (state.selected) {
@@ -234,6 +250,19 @@ function setYear(y) {
   out.classList.add('bump');
   $('season').value = y;
   render();
+}
+
+// jump to a player's season from the all-time lists
+function goTo(id, year) {
+  stop();
+  if (state.selected && state.selected !== id) state.kept.delete(state.selected);
+  state.selected = id;
+  state.kept.add(id);
+  state.year = year;
+  $('year').textContent = year;
+  $('season').value = year;
+  render();
+  document.querySelector('.chart-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function select(id) {
@@ -424,6 +453,7 @@ function readUrl(first, last) {
   }
   if (p.get('s') === 'pa') state.sortKey = 'pa';
   if (COMPARE_BY[p.get('c')]) state.compare = p.get('c');
+  if (['seasons', 'careers'].includes(p.get('v'))) state.view = p.get('v');
   state.faint = p.get('f') === '1';
   const id = p.get('p');
   if (id && /^[a-z0-9-]{8}$/.test(id)) {
@@ -438,6 +468,7 @@ function writeUrl() {
   if (state.metric !== 'cap') p.set('m', state.metric);
   if (state.sortKey === 'pa') p.set('s', 'pa');
   if (state.compare) p.set('c', state.compare);
+  if (state.view !== 'season') p.set('v', state.view);
   if (state.faint) p.set('f', '1');
   if (state.selected) p.set('p', state.selected);
   history.replaceState(null, '', `${location.pathname}?${p}`);

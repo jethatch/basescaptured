@@ -372,6 +372,16 @@ button, input, select { font: inherit; color: inherit; }
 /* ---------------------------------------------------------------- table */
 
 .board { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; align-self: stretch; }
+.tabs button {
+  min-height: 40px; padding: 0 14px; border-radius: 999px; border: 2px solid var(--rule);
+  background: transparent; font: 800 14px var(--font-display); cursor: pointer;
+}
+.tabs button[aria-selected="true"] { background: var(--sel-bg); color: var(--sel-ink); border-color: var(--sel-bg); }
+.alltime { width: 100%; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.alltime-note { align-self: flex-start; font-size: 13px; }
+.thumb { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; object-position: top; background: var(--card); border: 2px solid var(--rule); vertical-align: middle; margin-right: 10px; flex: none; }
+.who { display: inline-flex; align-items: center; }
 .table-wrap { width: 100%; overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
 .table th {

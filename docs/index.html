@@ -87,7 +87,13 @@
         </figure>
 
         <section class="board" aria-label="Leaderboard">
-          <div class="table-wrap">
+          <div class="tabs" id="tabs" role="tablist" aria-label="Leaderboard view">
+            <button type="button" role="tab" data-view="season" aria-selected="true">This season</button>
+            <button type="button" role="tab" data-view="seasons" aria-selected="false">All-time seasons</button>
+            <button type="button" role="tab" data-view="careers" aria-selected="false">All-time careers</button>
+          </div>
+          <div class="alltime" id="alltime" hidden></div>
+          <div class="table-wrap" id="season-table">
             <table class="table" id="table">
               <thead><tr id="thead"></tr></thead>
               <tbody id="tbody"></tbody>
