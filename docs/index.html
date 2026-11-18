@@ -8,6 +8,12 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="Bases Captured">
   <meta property="og:description" content="Every plate appearance leaves bases on the table. Who takes the most of them? A just-for-fun MLB stat, 1975–2025.">
+  <meta property="og:url" content="https://jethatch.github.io/basescaptured/">
+  <meta property="og:image" content="https://jethatch.github.io/basescaptured/img/preview.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Bases Captured, 1975–2025: a baseball diamond showing a batter and a runner taking bases, and the words: every plate appearance leaves bases on the table. Who takes the most of them?">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 30 16 16 30 2 16Z' fill='%23f99d1b' stroke='%23064f6e' stroke-width='3'/%3E%3C/svg%3E">
   <script>
     // set the theme before first paint: saved choice, else the device setting
@@ -55,6 +61,8 @@
       <div class="control-row">
         <div class="metrics" role="group" aria-label="Measure" id="metrics"></div>
         <span class="spacer"></span>
+        <label class="compare" for="compare">Compare to
+          <select id="compare"><option value="">Nothing</option></select></label>
         <label class="check"><input type="checkbox" id="faint"> Add part-timers (100+ PA)</label>
         <form class="search" id="search" role="search">
           <label class="visually-hidden" for="search-input">Find a player this season</label>
@@ -72,8 +80,10 @@
             <span class="hint hint-mouse">Hover a dot to see who it is. Click to keep them.</span>
             <span class="hint hint-touch">Tap a dot to see who it is.</span>
           </figcaption>
-          <div class="swarm" id="swarm" role="img" aria-label="Dot plot of hitters by the chosen measure"></div>
+          <p class="visually-hidden">Each dot is one hitter, placed by the chosen measure; dots stack where values are close. The leaderboard below lists the same players.</p>
+          <div class="swarm" id="swarm" role="group" aria-label="Chart of hitters by the chosen measure"></div>
           <div class="axis" id="axis" aria-hidden="true"></div>
+          <div class="disagree" id="disagree" hidden></div>
         </figure>
 
         <section class="board" aria-label="Leaderboard">
@@ -129,6 +139,7 @@
       <li>A runner thrown out still keeps the bases he reached safely first.</li>
       <li>Bases taken on errors, dropped third strikes and catcher's interference count, and the player panel says how many.</li>
       <li>Every plate appearance counts, walks and sacrifices included. Regular season only.</li>
+      <li>That has quirks: a sacrifice bunt that moves a runner up, or an intentional walk with runners on, often scores better than an average plate appearance, while an intentional walk with the bases empty pulls a great hitter down a little.</li>
       <li>Qualified hitters have 3.1 plate appearances per team game, the same line as the batting title.</li>
     </ul>
   </dialog>

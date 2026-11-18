@@ -287,7 +287,34 @@ button, input, select { font: inherit; color: inherit; }
   transition: transform 0.7s var(--spring), opacity 0.4s, width 0.4s var(--spring), height 0.4s var(--spring), background-color 0.3s;
   will-change: transform;
 }
-.dot.faint { background: var(--dot-faint); }
+/* part-timers: hollow rings, lighter than the solid dots but still a full-contrast outline */
+.dot.faint { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dot); opacity: 0.85; }
+.dot.off { opacity: 0.5; }
+.overlay, .yaxis { display: none; }
+.is-scatter .overlay { display: block; position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.is-scatter .yaxis { display: block; position: absolute; left: 0; top: 0; bottom: 0; width: 0; pointer-events: none; }
+.yaxis span { position: absolute; left: 4px; font: 700 11px var(--font-display); white-space: nowrap; opacity: 0.85; }
+.overlay .fit { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 2 6; stroke-linecap: round; opacity: 0.6; }
+.overlay .yleague { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 5; }
+.compare { display: inline-flex; align-items: center; gap: 8px; font: 700 14px var(--font-display); }
+.compare select {
+  min-height: 40px; padding: 0 10px; border-radius: 10px; border: 2px solid var(--rule);
+  background: var(--card); font: 700 14px var(--font-display);
+}
+.disagree { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin-top: 12px; font-size: 14px; }
+.disagree h3 { margin: 0 0 4px; font: 800 12px var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; }
+.disagree ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 2px; }
+.disagree button { border: 0; background: none; padding: 2px 0; font: 700 14px var(--font-display); cursor: pointer; text-align: left; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+@media (max-width: 640px) { .disagree { grid-template-columns: minmax(0, 1fr); } }
+.offscale {
+  position: absolute;
+  bottom: 4px;
+  font: 700 11px var(--font-display);
+  opacity: 0.85;
+  pointer-events: none;
+}
+.offscale-lo { left: 0; }
+.offscale-hi { right: 0; }
 .dot.entering { --s: 0; opacity: 0; }
 .dot.leaving { --s: 0.2; opacity: 0; pointer-events: none; }
 .dot:hover, .dot.hovered { --s: 1.6; z-index: 3; }
@@ -432,6 +459,12 @@ button, input, select { font: inherit; color: inherit; }
 .tile .v { font: 700 21px var(--font-text); }
 .tile .v small { font-size: 12px; font-weight: 400; }
 .panel-label { font: 800 11px var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; }
+.others { list-style: none; margin: 6px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.others li { background: var(--panel-soft); border-radius: 8px; padding: 5px 7px; display: flex; flex-direction: column; line-height: 1.2; }
+.others li.ours { box-shadow: inset 0 0 0 2px var(--accent); }
+.others .o-k { font: 800 10px var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; }
+.others .o-v { font: 700 15px var(--font-text); }
+.others .o-r { font-size: 12px; }
 .spark { width: 100%; height: 120px; display: block; overflow: visible; }
 .spark .s-league { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 5; }
 .spark .s-player { fill: none; stroke: var(--panel-ink); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }

@@ -22,9 +22,16 @@ export const METRICS = [
     help: 'All the bases he and the runners took, divided by all the bases there were to take, over the whole season.',
   },
   {
+    key: 'plus',
+    label: 'Captured+',
+    short: 'Captured+',
+    help: 'Bases captured compared with an average hitter in the same spots that season: same runners on, same number of outs. 100 is average; 120 means 20% more. Evens out lineup spot and era.',
+  },
+  {
     key: 'per',
     label: 'Per plate appearance',
     short: 'Per PA',
+    chart: false, // nearly the same ranking as Bases captured (r ≈ .97), so it lives only in the player panel
     help: 'The average of each plate appearance’s own ratio. Every trip to the plate counts the same, bases loaded or empty.',
   },
   {
@@ -35,12 +42,47 @@ export const METRICS = [
   },
   {
     key: 'run',
-    label: 'Runners moved',
+    label: 'Runners’ bases',
     short: 'Runners',
-    help: 'Just the runners: of the bases they had left to reach home, how many they took on his plate appearances.',
+    help: 'Just the runners: of the bases they had left to reach home, how many they took on his plate appearances. It leans heavily on who was on base and how fast they were, so it swings a lot from year to year.',
   },
 ];
 export const METRIC = Object.fromEntries(METRICS.map((m) => [m.key, m]));
+export const CHART_METRICS = METRICS.filter((m) => m.chart !== false);
+
+// Familiar stats to compare against, all worked out from the same Retrosheet plays.
+export const COMPARE = [
+  { key: 'ops', label: 'OPS', help: 'On-base plus slugging.' },
+  { key: 'opsplus', label: 'OPS+', help: 'OPS against the league that season; 100 is average. No park adjustment, so it won’t match published OPS+ exactly.' },
+  { key: 'avg', label: 'Batting average', short: 'AVG', help: 'Hits per at-bat.' },
+  { key: 'hr', label: 'Home runs', short: 'HR', help: 'Home runs.' },
+  { key: 'rbi', label: 'RBI', help: 'Runs batted in.' },
+  { key: 're24', label: 'RE24', help: 'Runs he added compared with what the base-out situations he came up in would normally produce. Also accounts for who was on and how many were out.' },
+];
+export const COMPARE_BY = Object.fromEntries(COMPARE.map((c) => [c.key, c]));
+const INT_KEYS = new Set(['plus', 'opsplus', 'hr', 'rbi']);
+
+export function traditional(r, lg) {
+  const obpDen = r.ab + r.bb + r.hbp + r.sf;
+  const obp = obpDen ? (r.h + r.bb + r.hbp) / obpDen : 0;
+  const slg = r.ab ? r.tb / r.ab : 0;
+  return {
+    avg: r.ab ? r.h / r.ab : 0,
+    obp,
+    slg,
+    ops: obp + slg,
+    opsplus: lg && lg.obp ? 100 * (obp / lg.obp + slg / lg.slg - 1) : 0,
+    hr: r.hr,
+    rbi: r.rbi,
+    re24: r.re24,
+  };
+}
+
+// a measure or comparison stat for a row
+export function val(r, key) {
+  if (key === 'pa') return r.pa;
+  return key in r.m ? r.m[key] : r.t?.[key];
+}
 
 export function measures(r) {
   return {
@@ -48,7 +90,35 @@ export function measures(r) {
     per: r.pa ? r.ratio_sum / r.pa : 0,
     own: r.pa ? r.bat_cap / (4 * r.pa) : 0,
     run: r.run_poss ? r.run_cap / r.run_poss : 0,
+    plus: r.exp ? (100 * r.cap) / r.exp : 0,
   };
+}
+
+// Rank qualified hitters by a measure (or 'pa'); ties share a rank at the 3 decimals shown.
+export function rankMap(rows, key) {
+  const rounded = (r) => {
+    const v = val(r, key);
+    return key === 'pa' || INT_KEYS.has(key) ? Math.round(v) : key === 're24' ? Math.round(v * 10) : Math.round(v * 1000);
+  };
+  const vals = rows.filter((r) => r.qualified).map((r) => [r.id, rounded(r)]);
+  const order = vals.map(([, v]) => v).sort((a, b) => b - a);
+  const first = new Map();
+  order.forEach((v, i) => { if (!first.has(v)) first.set(v, i + 1); });
+  return new Map(vals.map(([id, v]) => [id, first.get(v)]));
+}
+
+export function seasonRanks(season, key) {
+  season.ranks ??= {};
+  season.ranks[key] ??= rankMap(season.rows, key);
+  return season.ranks[key];
+}
+
+// format a measure's value: Captured+ is a whole number around 100, the rest are .000 rates
+export function fmtv(key, v) {
+  if (v == null || Number.isNaN(v)) return '—';
+  if (INT_KEYS.has(key)) return String(Math.round(v));
+  if (key === 're24') return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(1);
+  return fmt(v);
 }
 
 export function fmt(v) {
@@ -98,8 +168,9 @@ export async function loadSeason(index, year) {
     const r = Object.fromEntries(d.fields.map((f, i) => [f, x[i]]));
     r.m = measures(r);
     r.qualified = r.pa >= qualPa;
-    r.faintOk = r.pa >= index.faint_min_pa;
+    r.faintOk = r.pa >= index.faint_min_pa && !r.pitcher; // pitchers batting stay off the chart
     r.team = teamNames(index, r.teams);
+    r.t = traditional(r, meta.league);
     return r;
   });
   return { year, meta, rows, qualPa, league: meta.league };

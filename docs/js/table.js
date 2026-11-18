@@ -1,7 +1,7 @@
 // The leaderboard under the chart. Rows are kept by player id and slide to their new
 // place (FLIP) when the season, measure or sort changes.
 
-import { METRICS, fmt } from './data.js';
+import { CHART_METRICS as METRICS, COMPARE_BY, val, fmtv } from './data.js';
 
 const LIMIT = 25;
 const COLS = [
@@ -22,9 +22,7 @@ export class Board {
     this.rowsById = new Map();
     this.last = null;
 
-    thead.innerHTML = COLS.map((c) => c.sortable
-      ? `<th scope="col" data-key="${c.key}"><button class="th-btn" type="button">${c.label}</button></th>`
-      : `<th scope="col">${c.label === '#' ? '<span class="visually-hidden">Rank</span>#' : c.label}</th>`).join('');
+    this.head(null);
     thead.addEventListener('click', (e) => {
       const th = e.target.closest('th[data-key]');
       if (th) this.onSort(th.dataset.key);
@@ -39,22 +37,23 @@ export class Board {
     });
   }
 
+  head(compare) {
+    this.compare = compare;
+    const cols = compare ? [...COLS, { key: compare, label: COMPARE_BY[compare].short || COMPARE_BY[compare].label, sortable: true }] : COLS;
+    this.thead.innerHTML = cols.map((c) => c.sortable
+      ? `<th scope="col" data-key="${c.key}"><button class="th-btn" type="button">${c.label}</button></th>`
+      : `<th scope="col">${c.label === '#' ? '<span class="visually-hidden">Rank</span>#' : c.label}</th>`).join('');
+  }
+
   render(opts) {
     this.last = opts;
-    const { rows, sortKey, selected, faint } = opts;
+    const { rows, ranks, sortKey, selected, faint, compare = null } = opts;
+    if (compare !== this.compare) this.head(compare);
     const shown = rows.filter((r) => r.qualified || (faint && r.faintOk));
-    const val = (r) => (sortKey === 'pa' ? r.pa : r.m[sortKey]);
-    shown.sort((a, b) => val(b) - val(a) || b.pa - a.pa);
+    shown.sort((a, b) => val(b, sortKey) - val(a, sortKey) || b.pa - a.pa);
 
-    // ranks share ties at the shown precision
-    let prev = null;
-    let prevRank = 0;
-    shown.forEach((r, i) => {
-      const key = sortKey === 'pa' ? r.pa : fmt(r.m[sortKey]);
-      r._rank = key === prev ? prevRank : i + 1;
-      prev = key;
-      prevRank = r._rank;
-    });
+    // rank among qualified hitters (ties shared at the shown 3 decimals); part-timers get none
+    for (const r of shown) r._rank = ranks.get(r.id) ?? '–';
 
     let list = this.expanded ? shown : shown.slice(0, LIMIT);
     if (selected && !list.some((r) => r.id === selected)) {
@@ -93,8 +92,9 @@ export class Board {
         `<td class="rank">${r._rank}</td>` +
         `<td><span class="player-cell"><button class="player-btn" type="button">${esc(r.name)}</button>` +
         `<span class="player-team">${esc(r.team)}</span></span></td>` +
-        METRICS.map((m) => `<td class="${m.key === sortKey ? 'sorted' : ''}">${fmt(r.m[m.key])}</td>`).join('') +
-        `<td class="${sortKey === 'pa' ? 'sorted' : ''}">${r.pa}</td>`;
+        METRICS.map((m) => `<td class="${m.key === sortKey ? 'sorted' : ''}">${fmtv(m.key, r.m[m.key])}</td>`).join('') +
+        `<td class="${sortKey === 'pa' ? 'sorted' : ''}">${r.pa}</td>` +
+        (compare ? `<td class="${sortKey === compare ? 'sorted' : ''}">${fmtv(compare, val(r, compare))}</td>` : '');
       frag.appendChild(tr);
     }
     this.tbody.appendChild(frag);

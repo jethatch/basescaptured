@@ -1,4 +1,4 @@
-import { METRICS, METRIC, fmt, ordinal, headshot, loadIndex, loadSeason } from './data.js';
+import { METRICS, METRIC, CHART_METRICS, COMPARE, COMPARE_BY, val, fmt, fmtv, ordinal, headshot, loadIndex, loadSeason, seasonRanks } from './data.js';
 import { Swarm } from './chart.js';
 import { Board } from './table.js';
 import { Panel } from './panel.js';
@@ -12,6 +12,7 @@ const state = {
   metric: 'cap',
   sortKey: 'cap',
   faint: false,
+  compare: '',
   selected: null,
   kept: new Set(),
   playing: false,
@@ -41,6 +42,18 @@ async function init() {
   buildMetrics();
   buildHowMeasures();
   $('faint').checked = state.faint;
+  const cmp = $('compare');
+  cmp.insertAdjacentHTML('beforeend', COMPARE.map((c) => `<option value="${c.key}">${c.label}</option>`).join(''));
+  cmp.value = state.compare;
+  cmp.addEventListener('change', () => {
+    state.compare = cmp.value;
+    if (!state.compare && COMPARE_BY[state.sortKey]) state.sortKey = state.metric;
+    render();
+  });
+  $('disagree').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-id]');
+    if (b) select(b.dataset.id);
+  });
 
   swarm = new Swarm($('swarm'), $('axis'), {
     onHover: showTip,
@@ -50,7 +63,7 @@ async function init() {
   board = new Board($('thead'), $('tbody'), $('more'), {
     onSelect: (id) => select(id),
     onSort: (key) => {
-      if (key === 'pa') state.sortKey = 'pa';
+      if (key === 'pa' || COMPARE_BY[key]) state.sortKey = key;
       else setMetric(key);
       render();
     },
@@ -86,7 +99,7 @@ let panel;
 
 function buildMetrics() {
   const box = $('metrics');
-  box.innerHTML = METRICS.map((m) => `
+  box.innerHTML = CHART_METRICS.map((m) => `
     <span class="metric" data-key="${m.key}" data-on="${m.key === state.metric}">
       <button class="metric-btn" type="button" data-key="${m.key}" aria-pressed="${m.key === state.metric}">${m.label}</button>
       <button class="metric-q" type="button" data-help="${m.key}" aria-label="What is ${m.label}?">?</button>
@@ -113,7 +126,7 @@ function buildMetrics() {
 }
 
 function buildHowMeasures() {
-  $('how-measures').innerHTML = METRICS.map((m) => `<dt>${m.label}</dt><dd>${m.help}</dd>`).join('');
+  $('how-measures').innerHTML = METRICS.map((m) => `<dt>${m.label}</dt><dd>${m.help}${m.chart === false ? ' Shown in the player panel.' : ''}</dd>`).join('');
 }
 
 function setMetric(key) {
@@ -143,6 +156,8 @@ async function render() {
     ? `${qual.length} qualified hitters + ${shownCount - qual.length} part-timers`
     : `${qual.length} qualified hitters`;
 
+  const cmpKey = state.compare || null;
+  const yLeague = !cmpKey ? null : cmpKey === 'opsplus' ? 100 : cmpKey === 're24' ? 0 : s.league[cmpKey] ?? null;
   swarm.update({
     rows: s.rows,
     metric,
@@ -151,15 +166,32 @@ async function render() {
     faces,
     selected: state.selected,
     faint: state.faint,
+    compare: cmpKey,
+    yDomain: cmpKey ? index.domains[cmpKey] : null,
+    yLeague,
   });
-  board.render({ rows: s.rows, sortKey: state.sortKey, selected: state.selected, faint: state.faint });
+  if (cmpKey) {
+    $('chart-count').textContent = `${qual.length} qualified hitters · ${METRIC[metric].label} across, ${COMPARE_BY[cmpKey].label} up · they agree at r = ${swarm.corr.toFixed(2)}`;
+  }
+  showDisagreements(s, metric, cmpKey);
+  board.render({ rows: s.rows, ranks: seasonRanks(s, state.sortKey), sortKey: state.sortKey, selected: state.selected, faint: state.faint, compare: cmpKey });
   fillNames(s.rows);
 
   if (state.selected) {
     const row = s.rows.find((r) => r.id === state.selected);
-    const rank = row && row.qualified ? 1 + qual.filter((r) => r.m[metric] > row.m[metric]).length : null;
+    const rank = seasonRanks(s, metric).get(state.selected) ?? null;
+    // where the same season ranks him in familiar stats (qualified hitters only)
+    const others = row && row.qualified
+      ? [...CHART_METRICS.filter((m) => m.key === 'cap' || m.key === 'plus'), ...COMPARE].map((c) => ({
+        key: c.key,
+        label: c.short || c.label,
+        value: fmtv(c.key, val(row, c.key)),
+        rank: seasonRanks(s, c.key).get(row.id),
+        ours: c.key === 'cap' || c.key === 'plus',
+      }))
+      : [];
     $('main').classList.add('has-panel');
-    panel.show({ index, id: state.selected, year: state.year, metric, seasonRow: row, seasonRank: rank, seasonCount: qual.length });
+    panel.show({ index, id: state.selected, year: state.year, metric, seasonRow: row, seasonRank: rank, seasonCount: qual.length, others });
   } else {
     $('main').classList.remove('has-panel');
     panel.hide();
@@ -169,6 +201,27 @@ async function render() {
   // warm the next season so playback and the slider feel instant
   const next = index.seasons.find((x) => x.year === state.year + 1);
   if (next) loadSeason(index, next.year).catch(() => {});
+}
+
+// the hitters the two stats disagree about most, by rank among qualified hitters
+function showDisagreements(s, metric, cmpKey) {
+  const box = $('disagree');
+  if (!cmpKey) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  const a = seasonRanks(s, metric);
+  const b = seasonRanks(s, cmpKey);
+  const gaps = s.rows.filter((r) => r.qualified).map((r) => ({ r, ra: a.get(r.id), rb: b.get(r.id) }))
+    .map((g) => ({ ...g, gap: g.rb - g.ra }));
+  gaps.sort((x, y) => y.gap - x.gap);
+  const mine = METRIC[metric].label;
+  const theirs = COMPARE_BY[cmpKey].label;
+  const item = (g) => `<li><button type="button" data-id="${g.r.id}">${esc(g.r.name)}</button> ${ordinal(g.ra)} vs ${ordinal(g.rb)}</li>`;
+  box.innerHTML = `<div><h3>${esc(mine)} likes them more</h3><ol>${gaps.slice(0, 3).map(item).join('')}</ol></div>
+    <div><h3>${esc(theirs)} likes them more</h3><ol>${gaps.slice(-3).reverse().map(item).join('')}</ol></div>`;
+  box.hidden = false;
 }
 
 function setYear(y) {
@@ -203,6 +256,7 @@ function play() {
   const first = index.seasons[0].year;
   if (state.year >= last) setYear(first);
   state.playing = true;
+  $('year').setAttribute('aria-live', 'off'); // don't announce a new year every second
   $('play').setAttribute('aria-pressed', 'true');
   $('play').querySelector('.play-label').textContent = 'Pause';
   playTimer = setInterval(() => {
@@ -218,6 +272,7 @@ function stop() {
   if (!state.playing) return;
   state.playing = false;
   clearInterval(playTimer);
+  $('year').setAttribute('aria-live', 'polite');
   $('play').setAttribute('aria-pressed', 'false');
   const s = index.seasons;
   $('play').querySelector('.play-label').textContent = `Play ${s[0].year} → ${s[s.length - 1].year}`;
@@ -230,11 +285,10 @@ function showTip(id, node) {
   const r = season.rows.find((x) => x.id === id);
   if (!r) return;
   const tip = $('tip');
-  const qual = season.rows.filter((x) => x.qualified);
-  const rank = r.qualified ? 1 + qual.filter((x) => x.m[state.metric] > r.m[state.metric]).length : null;
+  const rank = seasonRanks(season, state.metric).get(id) ?? null;
   tip.innerHTML = `<img src="${headshot(r.mlbam)}" alt="">
     <span><strong>${esc(r.name)}</strong>${esc(r.team)} · ${r.pa} PA<br>
-    <span class="tip-val">${fmt(r.m[state.metric])}</span> ${rank ? ordinal(rank) : 'part-timer'}</span>`;
+    <span class="tip-val">${fmtv(state.metric, r.m[state.metric])}</span> ${rank ? ordinal(rank) : 'part-timer'}</span>`;
   tip.hidden = false;
   const b = node.getBoundingClientRect();
   const t = tip.getBoundingClientRect();
@@ -364,11 +418,12 @@ function readUrl(first, last) {
   state.year = y >= first && y <= last ? y : last;
   $('year').textContent = state.year;
   const m = p.get('m');
-  if (METRIC[m]) {
+  if (CHART_METRICS.some((x) => x.key === m)) {
     state.metric = m;
     state.sortKey = m;
   }
   if (p.get('s') === 'pa') state.sortKey = 'pa';
+  if (COMPARE_BY[p.get('c')]) state.compare = p.get('c');
   state.faint = p.get('f') === '1';
   const id = p.get('p');
   if (id && /^[a-z0-9-]{8}$/.test(id)) {
@@ -382,6 +437,7 @@ function writeUrl() {
   p.set('y', state.year);
   if (state.metric !== 'cap') p.set('m', state.metric);
   if (state.sortKey === 'pa') p.set('s', 'pa');
+  if (state.compare) p.set('c', state.compare);
   if (state.faint) p.set('f', '1');
   if (state.selected) p.set('p', state.selected);
   history.replaceState(null, '', `${location.pathname}?${p}`);

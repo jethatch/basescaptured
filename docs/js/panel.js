@@ -1,7 +1,7 @@
 // The player panel: this season's numbers, a season-by-season line against the league,
 // the flags in plain words, and an expandable full-career view.
 
-import { METRICS, METRIC, fmt, ordinal, num, headshot, teamName, loadCareer } from './data.js';
+import { METRICS, METRIC, fmt, fmtv, ordinal, num, headshot, teamName, loadCareer } from './data.js';
 
 const SPARK_MIN_PA = 50;
 
@@ -26,7 +26,7 @@ export class Panel {
     this.last = null;
   }
 
-  async show({ index, id, year, metric, seasonRow, seasonRank, seasonCount }) {
+  async show({ index, id, year, metric, seasonRow, seasonRank, seasonCount, others = [] }) {
     const token = ++this.token;
     const wasHidden = this.el.hidden;
     this.el.hidden = false;
@@ -35,12 +35,12 @@ export class Panel {
     }
     const career = await loadCareer(index, id);
     if (token !== this.token) return;
-    this.paint({ index, id, year, metric, seasonRow, seasonRank, seasonCount, career });
+    this.paint({ index, id, year, metric, seasonRow, seasonRank, seasonCount, career, others });
   }
 
   paint(ctx) {
     this.last = ctx;
-    const { index, year, metric, seasonRank, seasonCount, career } = ctx;
+    const { index, year, metric, seasonRank, seasonCount, career, others } = ctx;
     if (!career) {
       this.el.innerHTML = `<button class="btn btn-icon" data-close aria-label="Close">×</button><p>No record for this player.</p>`;
       return;
@@ -61,22 +61,26 @@ export class Panel {
     if (s) {
       const rankText = seasonRank ? `<strong>${ordinal(seasonRank)}</strong> of ${seasonCount} qualified` : 'not qualified';
       now = `
-        <div class="panel-big"><span class="val">${fmt(s.m[metric])}</span>
+        <div class="panel-big"><span class="val">${fmtv(metric, s.m[metric])}</span>
           <span class="lbl">${M.label.toLowerCase()} · ${rankText}</span></div>
         <div class="tiles">
           ${METRICS.map((m) => `<div class="tile ${m.key === metric ? 'on' : ''}"><span class="k">${m.label}</span>
-            <span class="v">${fmt(s.m[m.key])}${tileExtra(m.key, s)}</span></div>`).join('')}
+            <span class="v">${fmtv(m.key, s.m[m.key])}${tileExtra(m.key, s)}</span></div>`).join('')}
         </div>`;
     }
 
+    const compare = others && others.length ? `
+      <div><div class="panel-label">How else he ranked in ${year}</div>
+        <ul class="others">${others.map((o) => `<li class="${o.ours ? 'ours' : ''}"><span class="o-k">${o.label}</span>
+          <span class="o-v">${o.value}</span><span class="o-r">${o.rank ? ordinal(o.rank) : '—'}</span></li>`).join('')}</ul></div>` : '';
     const spark = sparkline(career.seasons, leagueBy, metric, year);
     const notes = s ? flagNotes(s) : '';
 
-    const careerHtml = this.full ? fullCareer(index, career) : '';
+    const careerHtml = this.full ? fullCareer(index, career, metric, leagueBy) : '';
 
-    this.el.innerHTML = `${head}${now}
+    this.el.innerHTML = `${head}${now}${compare}
       <div>
-        <div class="panel-label">${M.short} by season · dashed line is the league</div>
+        <div class="panel-label">${M.short} by season · dashed line is the league · hollow = not qualified</div>
         ${spark}
       </div>
       ${notes ? `<div class="notes">${notes}</div>` : ''}
@@ -90,15 +94,22 @@ function tileExtra(key, s) {
   if (key === 'cap') return ` <small>${num(s.cap)} of ${num(s.poss)}</small>`;
   if (key === 'own') return ` <small>${num(s.bat_cap)} of ${num(4 * s.pa)}</small>`;
   if (key === 'run') return ` <small>${num(s.run_cap)} of ${num(s.run_poss)}</small>`;
+  if (key === 'plus') return ' <small>100 = average</small>';
   return '';
 }
 
 function flagNotes(s) {
   const out = [];
+  if (s.lost || s.gdp) {
+    const parts = [];
+    if (s.lost) parts.push(`runners put out on his plate appearances lost ${s.lost} base${s.lost === 1 ? '' : 's'} they had already reached`);
+    if (s.gdp) parts.push(`he grounded into ${s.gdp} double play${s.gdp === 1 ? '' : 's'}`);
+    const t = parts.join('; ');
+    out.push(`<strong>Bases lost:</strong> ${t[0].toUpperCase()}${t.slice(1)}. (Not counted against the stat.)`);
+  }
   if (s.err) out.push(`${s.err} of his bases came on fielding errors.`);
   if (s.iw) out.push(`${s.iw} intentional walk${s.iw === 1 ? '' : 's'}.`);
   if (s.odd) out.push(`Reached ${s.odd} time${s.odd === 1 ? '' : 's'} on a dropped third strike or catcher’s interference.`);
-  if (s.xtra) out.push(`${s.xtra} runner base${s.xtra === 1 ? '' : 's'} from steals or wild pitches on the final pitch weren’t counted.`);
   return out.map((t) => `<p>${t}</p>`).join('');
 }
 
@@ -139,11 +150,11 @@ function sparkline(seasons, leagueBy, metric, year) {
     prevYear = x.year;
   }
   segs.push(cur);
-  const dots = pts.map((x) => `<circle class="s-pt ${x.rank ? '' : 'hollow'}" cx="${px(x.year).toFixed(1)}" cy="${py(x.m[metric]).toFixed(1)}" r="3"><title>${x.year}: ${fmt(x.m[metric])}</title></circle>`).join('');
+  const dots = pts.map((x) => `<circle class="s-pt ${x.of && x.rank_cap != null ? '' : 'hollow'}" cx="${px(x.year).toFixed(1)}" cy="${py(x.m[metric]).toFixed(1)}" r="3"><title>${x.year}: ${fmtv(metric, x.m[metric])}</title></circle>`).join('');
   const sel = pts.find((x) => x.year === year);
   const now = sel ? `<circle class="s-now" cx="${px(year).toFixed(1)}" cy="${py(sel.m[metric]).toFixed(1)}" r="6"/>` : '';
   const best = pts.reduce((a, b) => (b.m[metric] > a.m[metric] ? b : a));
-  const label = `${fmt(best.m[metric])} in ${best.year}`;
+  const label = `${fmtv(metric, best.m[metric])} in ${best.year}`;
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="Season by season ${METRIC[metric].label.toLowerCase()}, ${y0} to ${y1}; best ${label}. Hollow points are seasons he didn't qualify.">
     <polyline class="s-league" points="${lgPts}"/>
     ${segs.filter((s) => s.length > 1).map((s) => `<polyline class="s-player" points="${s.join(' ')}"/>`).join('')}
@@ -153,28 +164,33 @@ function sparkline(seasons, leagueBy, metric, year) {
   </svg>`;
 }
 
-function fullCareer(index, career) {
+function fullCareer(index, career, metric, leagueBy) {
   const s = career.seasons;
-  const tot = s.reduce((a, x) => ({ cap: a.cap + x.cap, poss: a.poss + x.poss, pa: a.pa + x.pa }), { cap: 0, poss: 0, pa: 0 });
-  let pool = s.filter((x) => x.rank);
+  const tot = s.reduce((a, x) => ({ cap: a.cap + x.cap, poss: a.poss + x.poss, pa: a.pa + x.pa, exp: a.exp + (x.exp || 0), lost: a.lost + (x.lost || 0), gdp: a.gdp + (x.gdp || 0) }), { cap: 0, poss: 0, pa: 0, exp: 0, lost: 0, gdp: 0 });
+  // what the league captured over the same seasons, weighted by his chances
+  const lgCap = s.reduce((a, x) => a + (leagueBy.get(x.year)?.cap ?? 0) * x.poss, 0) / tot.poss;
+  const rk = (x) => x[`rank_${metric}`];
+  let pool = s.filter((x) => rk(x) != null);
   if (pool.length < 3) pool = s.filter((x) => x.pa >= 100);
-  const best = [...pool].sort((a, b) => b.m.cap - a.m.cap).slice(0, 3);
-  const short = (x) => (x.of && x.rank ? ` · ${ordinal(x.rank)}` : '');
+  const best = [...pool].sort((a, b) => b.m[metric] - a.m[metric]).slice(0, 3);
+  const short = (x) => (rk(x) ? ` · ${ordinal(rk(x))}` : '');
+  const label = METRIC[metric].label.toLowerCase();
   const strikeShort = { 1981: 'strike-shortened', 1994: 'strike-shortened', 1995: 'shortened', 2020: '60-game season' };
 
   const ranks = s.map((x) => {
-    const r = x.rank;
+    const r = rk(x);
     const cls = r == null ? 'none' : r <= 10 ? 'top10' : r <= 30 ? 'top30' : '';
     return `<div class="${cls}" title="${x.year}: ${r ? `${ordinal(r)} of ${x.of}` : 'not qualified'}"><span>’${String(x.year).slice(2)}</span><strong>${r ?? '—'}</strong></div>`;
   }).join('');
 
   return `<div class="career">
     <div class="career-total"><span class="panel-label">Career</span><span class="val">${fmt(tot.cap / tot.poss)}</span>
-      <span>${num(tot.cap)} of ${num(tot.poss)} bases · ${num(tot.pa)} PA</span></div>
-    ${best.length ? `<div><span class="panel-label">Best seasons, bases captured</span><ol class="best">
+      <span>${num(tot.cap)} of ${num(tot.poss)} bases · ${num(tot.pa)} PA · league ${fmt(lgCap)} in his years${tot.exp ? ` · Captured+ ${Math.round((100 * tot.cap) / tot.exp)}` : ''}</span>
+      <span>Bases lost ${num(tot.lost)} · ${num(tot.gdp)} double plays</span></div>
+    ${best.length ? `<div><span class="panel-label">Best seasons, ${label}</span><ol class="best">
       ${best.map((x) => `<li><span><strong>${x.year}</strong> ${esc(teamsText(index, x.teams))}${strikeShort[x.year] ? ` <small>(${strikeShort[x.year]})</small>` : ''}</span>
-        <span><strong>${fmt(x.m.cap)}</strong>${short(x)}</span></li>`).join('')}</ol></div>` : ''}
-    <div><span class="panel-label">Rank in bases captured, each season</span><div class="ranks">${ranks}</div></div>
+        <span><strong>${fmtv(metric, x.m[metric])}</strong>${short(x)}</span></li>`).join('')}</ol></div>` : ''}
+    <div><span class="panel-label">Rank in ${label}, each season</span><div class="ranks">${ranks}</div></div>
     <div><span class="panel-label">Teams</span><p>${esc(teamSpans(index, s))}</p></div>
   </div>`;
 }

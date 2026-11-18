@@ -2,9 +2,9 @@
 // Dots are kept by player id so they spring from their old place to their new one
 // when the season or measure changes.
 
-import { fmt, headshot } from './data.js';
+import { fmtv, headshot } from './data.js';
 
-const MIN_H = 240;
+const MIN_H = 220;
 
 export class Swarm {
   constructor(el, axisEl, { onHover, onLeave, onPick }) {
@@ -20,6 +20,20 @@ export class Swarm {
     this.league.className = 'league';
     this.league.innerHTML = '<span></span>';
     el.appendChild(this.league);
+    this.offLo = document.createElement('span');
+    this.offLo.className = 'offscale offscale-lo';
+    this.offHi = document.createElement('span');
+    this.offHi.className = 'offscale offscale-hi';
+    this.offLo.hidden = this.offHi.hidden = true;
+    el.append(this.offLo, this.offHi);
+    this.overlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.overlay.setAttribute('class', 'overlay');
+    this.overlay.setAttribute('aria-hidden', 'true');
+    this.overlay.setAttribute('preserveAspectRatio', 'none');
+    this.yaxis = document.createElement('div');
+    this.yaxis.className = 'yaxis';
+    this.yaxis.setAttribute('aria-hidden', 'true');
+    el.append(this.overlay, this.yaxis);
 
     el.addEventListener('pointerover', (e) => {
       const n = e.target.closest('.dot');
@@ -67,49 +81,27 @@ export class Swarm {
     const dotRows = shown.filter((r) => !faces.has(r.id))
       .sort((a, b) => (b.qualified - a.qualified) || (a.m[metric] - b.m[metric]));
 
-    // stack dots in columns one dot wide
-    const stack = new Map();
-    const place = new Map();
-    for (const r of dotRows) {
-      const x = xOf(r.m[metric]);
-      const bin = Math.round(x / d);
-      const n = stack.get(bin) || 0;
-      stack.set(bin, n + 1);
-      place.set(r.id, { x, bottom: 4 + n * step, size: d, face: false, faint: !r.qualified });
+    let place;
+    let H;
+    let offLo = 0;
+    let offHi = 0;
+    if (opts.compare) {
+      ({ place, H, offLo, offHi } = this.scatter({ ...opts, shown, faceRows, dotRows, W, d, F, xOf, lo, hi }));
+    } else {
+      ({ place, H, offLo, offHi } = this.swarmLayout({ metric, faceRows, dotRows, d, F, step, xOf, lo, hi }));
     }
-    let maxStack = 0;
-    for (const n of stack.values()) maxStack = Math.max(maxStack, n);
-
-    // faces sit on top of the dots below them, stepping up to avoid each other
-    const placed = [];
-    let faceTop = 0;
-    for (const r of faceRows) {
-      const x = xOf(r.m[metric]);
-      let base = 0;
-      for (let b = Math.round((x - F / 2) / d); b <= Math.round((x + F / 2) / d); b++) base = Math.max(base, stack.get(b) || 0);
-      let bottom = 6 + base * step;
-      let moved = true;
-      while (moved) {
-        moved = false;
-        for (const p of placed) {
-          if (Math.abs(p.x - x) < F + 2 && Math.abs(p.bottom - bottom) < F + 2) {
-            bottom = p.bottom + F + 4;
-            moved = true;
-          }
-        }
-      }
-      placed.push({ x, bottom });
-      faceTop = Math.max(faceTop, bottom + F);
-      place.set(r.id, { x, bottom, size: F, face: true, faint: !r.qualified });
-    }
-
-    const H = Math.max(MIN_H, maxStack * step + 40, faceTop + 16);
+    this.el.classList.toggle('is-scatter', !!opts.compare);
     this.el.style.setProperty('--swarm-h', H + 'px');
+
+    this.offLo.hidden = !offLo;
+    this.offLo.textContent = `◂ ${offLo} below the scale`;
+    this.offHi.hidden = !offHi;
+    this.offHi.textContent = `${offHi} above the scale ▸`;
 
     // league line
     const lx = xOf(league);
     this.league.style.transform = `translateX(${lx}px)`;
-    this.league.firstChild.textContent = `League ${fmt(league)}`;
+    this.league.firstChild.textContent = metric === 'plus' ? 'League 100' : `League ${fmtv(metric, league)}`;
     this.league.firstChild.style.left = lx > W - 110 ? '-104px' : '6px';
 
     // enter / update
@@ -130,8 +122,9 @@ export class Swarm {
         clearTimeout(n._gone);
         n.classList.remove('leaving');
       }
-      n.setAttribute('aria-label', `${r.name}, ${r.team}, ${fmt(r.m[metric])}`);
+      n.setAttribute('aria-label', `${r.name}, ${r.team}, ${fmtv(metric, r.m[metric])}`);
       n.classList.toggle('faint', p.faint && !p.face);
+      n.classList.toggle('off', !!p.off);
       n.classList.toggle('face', p.face);
       n.classList.toggle('selected', id === selected);
       n.tabIndex = p.face ? 0 : -1;
@@ -161,18 +154,132 @@ export class Swarm {
       }, 450);
     }
 
-    this.drawAxis(lo, hi, W);
+    this.drawAxis(lo, hi, W, metric);
   }
 
-  drawAxis(lo, hi, W) {
+  swarmLayout({ metric, faceRows, dotRows, d, F, step, xOf, lo, hi }) {
+    // a centred swarm: dots in each one-dot-wide column alternate above and below the middle line,
+    // so height shows only where values crowd together, not a count. dy is the offset from the line.
+    const count = new Map();
+    const upExt = new Map();
+    const place = new Map();
+    let offLo = 0;
+    let offHi = 0;
+    let maxUp = d / 2;
+    let maxDown = d / 2;
+    for (const r of dotRows) {
+      const v = r.m[metric];
+      const off = v < lo ? 'lo' : v > hi ? 'hi' : '';
+      if (off === 'lo') offLo++;
+      if (off === 'hi') offHi++;
+      const x = xOf(v);
+      const bin = Math.round(x / d);
+      const n = count.get(bin) || 0;
+      count.set(bin, n + 1);
+      const k = Math.ceil(n / 2);
+      const dy = n === 0 ? 0 : (n % 2 ? 1 : -1) * k * step;
+      upExt.set(bin, Math.max(upExt.get(bin) || 0, dy));
+      maxUp = Math.max(maxUp, dy + d / 2);
+      maxDown = Math.max(maxDown, -dy + d / 2);
+      place.set(r.id, { x, dy, size: d, face: false, faint: !r.qualified, off });
+    }
+
+    // faces float just above the dots beneath them, stepping up to avoid each other
+    const placed = [];
+    for (const r of faceRows) {
+      const x = xOf(r.m[metric]);
+      let top = -step;
+      for (let b = Math.round((x - F / 2) / d); b <= Math.round((x + F / 2) / d); b++) {
+        if (count.has(b)) top = Math.max(top, upExt.get(b));
+      }
+      let dy = top + d / 2 + 4 + F / 2;
+      let moved = true;
+      while (moved) {
+        moved = false;
+        for (const p of placed) {
+          if (Math.abs(p.x - x) < F + 2 && Math.abs(p.dy - dy) < F + 2) {
+            dy = p.dy + F + 4;
+            moved = true;
+          }
+        }
+      }
+      placed.push({ x, dy });
+      maxUp = Math.max(maxUp, dy + F / 2);
+      place.set(r.id, { x, dy, size: F, face: true, faint: !r.qualified, off: '' });
+    }
+
+    const H = Math.max(MIN_H, Math.ceil(maxUp + maxDown) + 44);
+    const mid = maxDown + (H - maxUp - maxDown) / 2; // the middle line, measured from the bottom
+    for (const p of place.values()) p.bottom = mid + p.dy - p.size / 2;
+    this.el.style.setProperty('--swarm-h', H + 'px');
+
+    return { place, H, offLo, offHi };
+  }
+
+  // scatter: the chosen measure across, a familiar stat up the side, with a best-fit line
+  scatter({ rows, shown, faceRows, dotRows, metric, compare, yDomain, yLeague, W, d, F, xOf, lo, hi }) {
+    const H = W < 560 ? 300 : 380;
+    const T = 18;
+    const B = 16;
+    const [ylo, yhi] = yDomain;
+    const yv = (r) => r.t[compare];
+    const yOf = (v) => B + ((Math.min(yhi, Math.max(ylo, v)) - ylo) / (yhi - ylo)) * (H - T - B);
+    const place = new Map();
+    let offLo = 0;
+    let offHi = 0;
+    for (const r of [...dotRows, ...faceRows]) {
+      const face = faceRows.includes(r);
+      const size = face ? F : d;
+      const x = r.m[metric];
+      const y = yv(r);
+      const off = x < lo || y < ylo ? 'lo' : x > hi || y > yhi ? 'hi' : '';
+      if (off === 'lo') offLo++;
+      if (off === 'hi') offHi++;
+      place.set(r.id, { x: xOf(x), bottom: yOf(y) - size / 2, size, face, faint: !r.qualified, off });
+    }
+
+    // least-squares line through the qualified hitters
+    const q = shown.filter((r) => r.qualified);
+    const n = q.length;
+    const mx = q.reduce((a, r) => a + r.m[metric], 0) / n;
+    const my = q.reduce((a, r) => a + yv(r), 0) / n;
+    let sxy = 0;
+    let sxx = 0;
+    let syy = 0;
+    for (const r of q) {
+      const dx = r.m[metric] - mx;
+      const dy = yv(r) - my;
+      sxy += dx * dy;
+      sxx += dx * dx;
+      syy += dy * dy;
+    }
+    const slope = sxx ? sxy / sxx : 0;
+    const yAt = (x) => my + slope * (x - mx);
+    this.corr = sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
+    const y1 = H - yOf(yAt(lo));
+    const y2 = H - yOf(yAt(hi));
+    const yl = yLeague != null ? H - yOf(yLeague) : null;
+    this.overlay.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    this.overlay.innerHTML = `<line class="fit" x1="0" y1="${y1.toFixed(1)}" x2="${W}" y2="${y2.toFixed(1)}"/>` +
+      (yl != null ? `<line class="yleague" x1="0" y1="${yl.toFixed(1)}" x2="${W}" y2="${yl.toFixed(1)}"/>` : '');
+
+    // y-axis labels
+    const ticks = niceTicks(ylo, yhi, 5);
+    this.yaxis.innerHTML = ticks.map((v) => `<span style="bottom:${(yOf(v) - 7).toFixed(1)}px">${fmtv(compare, v)}</span>`).join('');
+    return { place, H, offLo, offHi };
+  }
+
+  drawAxis(lo, hi, W, metric) {
     const span = hi - lo;
-    const tick = span <= 0.08 ? 0.01 : span <= 0.24 ? 0.02 : 0.05;
+    const tick = metric === 'plus'
+      ? (span <= 120 ? 10 : 20)
+      : span <= 0.08 ? 0.01 : span <= 0.24 ? 0.02 : 0.05;
     const parts = [];
     const first = Math.ceil(lo / tick - 1e-9) * tick;
     for (let v = first; v <= hi + 1e-9; v += tick) {
       const left = ((v - lo) / span) * 100;
       if (left < 2 || left > 98) continue;
-      parts.push(`<span style="left:${left.toFixed(2)}%">${fmt(v)}</span>`);
+      parts.push(`<span style="left:${left.toFixed(2)}%">${fmtv(metric, v)}</span>`);
     }
     if (this.axisEl.dataset.key !== parts.join('')) {
       this.axisEl.innerHTML = parts.join('');
@@ -183,4 +290,13 @@ export class Swarm {
   nodeFor(id) {
     return this.nodes.get(id);
   }
+}
+
+function niceTicks(lo, hi, n) {
+  const raw = (hi - lo) / n;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((m) => m >= raw) || raw;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+  return out.filter((v) => v > lo + step * 0.3 && v < hi - step * 0.1);
 }

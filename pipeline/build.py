@@ -46,10 +46,18 @@ BATTING_FIELDS = [
     'err', 'odd', 'iw',       # flags: error-gained bases, dropped-3rd-strike/interference PAs, intentional walks
     'xtra',                   # runner bases from a steal/WP/PB on the final pitch (excluded from cap, tracked)
     'mlbam',                  # MLB Advanced Media id (for headshots), from the Chadwick register; '' if unknown
+    'pitcher',                # 1 if most of his plate appearances came while playing pitcher (kept off the chart)
+    'exp',                    # bases an average hitter would have captured in his base-out situations (Captured+)
+    'lost',                   # bases lost: for runners put out on his plays, the base each had reached (not in the stat)
+    'gdp',                    # grounded into double plays
+    # traditional stats for comparison (all from the same Retrosheet plays)
+    'ab', 'h', 'tb', 'bb', 'hbp', 'sf', 'hr', 'rbi',
+    're24',                   # runs added vs. the expected runs of each base-out state (RE24)
 ]
 PA_FIELDS = ['gid', 'date', 'gametype', 'inning', 'top_bot', 'batter', 'pitcher', 'batteam', 'pitteam',
              'outs_pre', 'b1', 'b2', 'b3', 'event', 'possible', 'captured', 'bat_cap', 'run_cap',
-             'run_poss', 'err_bases', 'extra_bases', 'odd', 'iw', 'runner_outs']
+             'run_poss', 'err_bases', 'extra_bases', 'odd', 'iw', 'runner_outs', 'bat_f', 'lost', 'gdp',
+             'ab', 'h', 'tb', 'bb', 'hbp', 'sf', 'hr', 'rbi', 're24']
 
 
 # ---------------------------------------------------------------- download
@@ -89,9 +97,10 @@ def parse_advances(event):
         origin, sep, dest, rest = m.groups()
         fielding = [p for p in re.findall(r'\(([^)]*)\)', rest) if re.match(r'\d|E\d', p)]
         err = any('E' in p for p in fielding)
-        # an error negates the out, unless a later clean putout follows: '2XH(E5)(12)' is still out
-        is_out = sep == 'X' and not (fielding and 'E' in fielding[-1])
-        out[origin] = (BASE[dest], is_out, err)
+        # an error negates the out unless a clean putout is also recorded:
+        # '1X2(4E6)' is safe; '2XH(E5)(12)' and 'BX3(365)(E7/TH)' are still out
+        is_out = sep == 'X' and (not fielding or any('E' not in p for p in fielding))
+        out[origin] = (BASE[dest], is_out, err, sep == 'X')
     return out
 
 
@@ -132,7 +141,7 @@ def end_from_event(code, start, r, adv):
     """Destination using only the event text. Returns (end_base, is_out)."""
     a = adv.get(code)
     if a:
-        base, is_out, _ = a
+        base, is_out = a[0], a[1]
         return (max(start, base - 1), True) if is_out else (base, False)
     if code in forced_outs(r['event']):
         return (start, True)
@@ -174,7 +183,8 @@ def pa_record(r, stats, game_over=False):
         else:
             # put out on the play: keep bases safely reached before the out (rule 1e)
             a = adv.get(code)
-            end, out = (max(start, a[0] - 1) if (a and a[1]) else start), True
+            # (Retrosheet's base state is the authority that he was out, even when the text has an error)
+            end, out = (max(start, a[0] - 1) if (a and a[3]) else start), True
         if not inning_over and not plus_event:  # the event parser doesn't model '+' advances
             stats['checked'] += 1
             if (ev_end, ev_out) != (end, out):
@@ -204,9 +214,12 @@ def pa_record(r, stats, game_over=False):
         rec['err_bases'] += rec['bat_cap']
     rec['odd'] = int(r['k_safe'] == '1' or r['xi'] == '1')
     rec['iw'] = int(r['iw'] == '1')
+    # bases lost (kept apart from the stat): each erased runner loses the base he had reached
+    rec['lost'] = sum(int(x.split('>')[1]) for x in rec['runner_outs'])
+    rec['gdp'] = int(r['gdp'] == '1')
     rec['runner_outs'] = ' '.join(rec['runner_outs'])
     for k in ('gid', 'date', 'gametype', 'inning', 'top_bot', 'batter', 'pitcher', 'batteam', 'pitteam',
-              'outs_pre', 'event'):
+              'outs_pre', 'event', 'bat_f'):
         rec[k] = r[k]
     rec['b1'], rec['b2'], rec['b3'] = (int(bool(pre[b])) for b in (1, 2, 3))
     return rec
@@ -223,9 +236,17 @@ def build_season(year, names, mlbam, include_deduced):
         games_by_type[gt] += 1
 
     last_row = {r['gid']: i for i, r in enumerate(rows)}  # final event of each game (walk-offs)
+    re_table = run_expectancy(rows)
     stats = dict(checked=0, mismatch=0, examples=[])
-    recs = [pa_record(r, stats, game_over=(last_row[r['gid']] == i)) for i, r in enumerate(rows)
-            if r['pa'] == '1' and (include_deduced or r['gid'] not in deduced)]
+    recs = []
+    for i, r in enumerate(rows):
+        if r['pa'] != '1' or (not include_deduced and r['gid'] in deduced):
+            continue
+        over = last_row[r['gid']] == i
+        rec = pa_record(r, stats, game_over=over)
+        rec.update(traditional(r))
+        rec['re24'] = re24(r, re_table, over)
+        recs.append(rec)
 
     INTERIM.mkdir(parents=True, exist_ok=True)
     with gzip.open(INTERIM / f'{year}.csv.gz', 'wt', newline='') as f:
@@ -239,13 +260,23 @@ def build_season(year, names, mlbam, include_deduced):
     for r in rows:
         if r['gametype'] == 'regular':
             team_games[r['batteam']].add(r['gid'])
+    # Captured+: league average bases captured in each of the 24 base-out states this season
+    state_cap = collections.defaultdict(lambda: [0, 0])
+    for rec in recs:
+        if rec['gametype'] == 'regular':
+            sc = state_cap[(rec['outs_pre'], rec['b1'], rec['b2'], rec['b3'])]
+            sc[0] += rec['captured']
+            sc[1] += 1
+    state_mean = {k: c / n for k, (c, n) in state_cap.items()}
+
     for rec in recs:
         if rec['gametype'] != 'regular':
             continue
         a = agg.get(rec['batter'])
         if a is None:
             a = agg[rec['batter']] = dict(teams=[], pa=0, cap=0, poss=0, ratio_sum=0.0, bat_cap=0,
-                                          run_cap=0, run_poss=0, err=0, odd=0, iw=0, xtra=0)
+                                          run_cap=0, run_poss=0, err=0, odd=0, iw=0, xtra=0, p_pa=0, exp=0.0, lost=0, gdp=0,
+                                          ab=0, h=0, tb=0, bb=0, hbp=0, sf=0, hr=0, rbi=0, re24=0.0)
         if rec['batteam'] not in a['teams']:
             a['teams'].append(rec['batteam'])
         a['pa'] += 1
@@ -259,12 +290,20 @@ def build_season(year, names, mlbam, include_deduced):
         a['odd'] += rec['odd']
         a['iw'] += rec['iw']
         a['xtra'] += rec['extra_bases']
+        a['p_pa'] += rec['bat_f'] == '1'
+        a['exp'] += state_mean[(rec['outs_pre'], rec['b1'], rec['b2'], rec['b3'])]
+        a['lost'] += rec['lost']
+        a['gdp'] += rec['gdp']
+        for k in ('ab', 'h', 'tb', 'bb', 'hbp', 'sf', 'hr', 'rbi', 're24'):
+            a[k] += rec[k]
 
     out_rows = []
     for pid, a in agg.items():
         out_rows.append([pid, names.get(pid, pid), '/'.join(a['teams']), a['pa'], a['cap'], a['poss'],
                          round(a['ratio_sum'], 4), a['bat_cap'], a['run_cap'], a['run_poss'],
-                         a['err'], a['odd'], a['iw'], a['xtra'], mlbam.get(pid, '')])
+                         a['err'], a['odd'], a['iw'], a['xtra'], mlbam.get(pid, ''),
+                         int(2 * a['p_pa'] > a['pa']), round(a['exp'], 2), a['lost'], a['gdp'],
+                         a['ab'], a['h'], a['tb'], a['bb'], a['hbp'], a['sf'], a['hr'], a['rbi'], round(a['re24'], 1)])
     out_rows.sort(key=lambda x: -x[3])
     reg = [x for x in recs if x['gametype'] == 'regular']
     meta = dict(
@@ -282,6 +321,42 @@ def build_season(year, names, mlbam, include_deduced):
     with open(OUT / 'batting' / f'{year}.json', 'w') as f:
         json.dump(dict(meta=meta, fields=BATTING_FIELDS, rows=out_rows), f, separators=(',', ':'))
     return meta, stats
+
+
+def bases_key(a, b, c):
+    return (bool(a), bool(b), bool(c))
+
+
+def run_expectancy(rows):
+    """Average runs scored from each base-out state to the end of the half-inning (regular season)."""
+    total, count = collections.Counter(), collections.Counter()
+    acc, key = 0, None
+    for r in reversed(rows):
+        k = (r['gid'], r['inning'], r['top_bot'])
+        if k != key:
+            acc, key = 0, k
+        acc += int(r['runs'] or 0)
+        if r['gametype'] == 'regular':
+            state = (r['outs_pre'], *bases_key(r['br1_pre'], r['br2_pre'], r['br3_pre']))
+            total[state] += acc
+            count[state] += 1
+    return {s: total[s] / count[s] for s in count}
+
+
+def re24(r, table, game_over):
+    before = table.get((r['outs_pre'], *bases_key(r['br1_pre'], r['br2_pre'], r['br3_pre'])), 0.0)
+    if r['outs_post'] == '3' or game_over:
+        after = 0.0
+    else:
+        after = table.get((r['outs_post'], *bases_key(r['br1_post'], r['br2_post'], r['br3_post'])), 0.0)
+    return after - before + int(r['runs'] or 0)
+
+
+def traditional(r):
+    hits = [r[k] == '1' for k in ('single', 'double', 'triple', 'hr')]
+    return dict(ab=int(r['ab'] == '1'), h=int(any(hits)), tb=sum(i + 1 for i, x in enumerate(hits) if x),
+                bb=int(r['walk'] == '1'), hbp=int(r['hbp'] == '1'), sf=int(r['sf'] == '1'),
+                hr=int(r['hr'] == '1'), rbi=int(r['rbi'] or 0))
 
 
 def load_bio():
@@ -304,15 +379,37 @@ def load_register():
 
 
 CAREER_FIELDS = ['year', 'teams', 'pa', 'cap', 'poss', 'ratio_sum', 'bat_cap', 'run_cap', 'run_poss',
-                 'err', 'odd', 'iw', 'xtra', 'rank', 'of']
+                 'err', 'odd', 'iw', 'xtra', 'exp', 'lost', 'gdp', 'rank_cap', 'rank_per', 'rank_own', 'rank_run', 'rank_plus', 'of']
+METRIC_KEYS = ('cap', 'per', 'own', 'run', 'plus')
+
+
+def rank_map(qual, key):
+    """Rank qualified rows by one measure; ties share a rank at the 3 decimals the page shows."""
+    vals = {r['id']: round(measures(r)[key], 0 if key == 'plus' else 3) for r in qual}
+    order = sorted(vals.values(), reverse=True)
+    first = {}
+    for i, v in enumerate(order):
+        first.setdefault(v, i + 1)
+    return {pid: first[v] for pid, v in vals.items()}
 QUAL_PA_PER_GAME = 3.1
 FAINT_MIN_PA = 100
+
+
+def traditional_rates(r, lg_obp, lg_slg):
+    """Comparison stats; OPS+ here is league-relative with no park adjustment."""
+    ab, pa_obp = r.get('ab', 0), r.get('ab', 0) + r.get('bb', 0) + r.get('hbp', 0) + r.get('sf', 0)
+    obp = (r.get('h', 0) + r.get('bb', 0) + r.get('hbp', 0)) / pa_obp if pa_obp else 0.0
+    slg = r.get('tb', 0) / ab if ab else 0.0
+    return dict(avg=r.get('h', 0) / ab if ab else 0.0, obp=obp, slg=slg, ops=obp + slg,
+                opsplus=100 * (obp / lg_obp + slg / lg_slg - 1) if lg_obp and lg_slg else 0.0,
+                hr=r.get('hr', 0), rbi=r.get('rbi', 0), re24=r.get('re24', 0.0))
 
 
 def measures(r):
     """The four measures for a batting row (dict)."""
     return dict(cap=r['cap'] / r['poss'], per=r['ratio_sum'] / r['pa'], own=r['bat_cap'] / (4 * r['pa']),
-                run=(r['run_cap'] / r['run_poss']) if r['run_poss'] else 0.0)
+                run=(r['run_cap'] / r['run_poss']) if r['run_poss'] else 0.0,
+                plus=(100 * r['cap'] / r['exp']) if r.get('exp') else 0.0)
 
 
 def write_index(teams):
@@ -325,14 +422,16 @@ def write_index(teams):
         meta, fields = d['meta'], d['fields']
         rows = [dict(zip(fields, x)) for x in d['rows']]
         qual_pa = QUAL_PA_PER_GAME * meta['team_games']
-        qual = sorted((r for r in rows if r['pa'] >= qual_pa), key=lambda r: -measures(r)['cap'])
-        rank = {}
-        for i, r in enumerate(qual):
-            same = i and measures(qual[i - 1])['cap'] == measures(r)['cap']
-            rank[r['id']] = rank[qual[i - 1]['id']] if same else i + 1
+        qual = [r for r in rows if r['pa'] >= qual_pa]
+        ranks = {k: rank_map(qual, k) for k in METRIC_KEYS}
+        tot = {k: sum(r.get(k, 0) for r in rows) for k in ('pa', 'cap', 'poss', 'ratio_sum', 'bat_cap', 'run_cap',
+                                                            'run_poss', 'ab', 'h', 'tb', 'bb', 'hbp', 'sf')}
+        lg_obp = (tot['h'] + tot['bb'] + tot['hbp']) / max(1, tot['ab'] + tot['bb'] + tot['hbp'] + tot['sf'])
+        lg_slg = tot['tb'] / max(1, tot['ab'])
         for r in rows:
-            if r['pa'] >= FAINT_MIN_PA:
-                for k, v in measures(r).items():
+            if r['pa'] >= FAINT_MIN_PA and not r.get('pitcher'):
+                vals = dict(measures(r), **traditional_rates(r, lg_obp, lg_slg))
+                for k, v in vals.items():
                     spread[k].append(v)
                     if r['pa'] >= qual_pa:
                         qspread[k].append(v)
@@ -340,24 +439,24 @@ def write_index(teams):
             careers[r['id']]['n'] = r['name']
             careers[r['id']]['m'] = r.get('mlbam', '')
             c.append([meta['year'], r['teams'], r['pa'], r['cap'], r['poss'], r['ratio_sum'], r['bat_cap'],
-                      r['run_cap'], r['run_poss'], r['err'], r['odd'], r['iw'], r['xtra'],
-                      rank.get(r['id']), len(qual)])
-        tot = {k: sum(r[k] for r in rows) for k in ('pa', 'cap', 'poss', 'ratio_sum', 'bat_cap', 'run_cap', 'run_poss')}
+                      r['run_cap'], r['run_poss'], r['err'], r['odd'], r['iw'], r['xtra'], r.get('exp', 0), r.get('lost', 0), r.get('gdp', 0),
+                      *(ranks[k].get(r['id']) for k in METRIC_KEYS), len(qual)])
         league = dict(cap=tot['cap'] / tot['poss'], per=tot['ratio_sum'] / tot['pa'],
-                      own=tot['bat_cap'] / (4 * tot['pa']), run=tot['run_cap'] / tot['run_poss'])
+                      own=tot['bat_cap'] / (4 * tot['pa']), run=tot['run_cap'] / tot['run_poss'], plus=100.0,
+                      avg=tot['h'] / max(1, tot['ab']), obp=lg_obp, slg=lg_slg, ops=lg_obp + lg_slg, opsplus=100.0)
         meta = dict(meta, qualified=len(qual), qual_pa=round(qual_pa),
                     league={k: round(v, 5) for k, v in league.items()})
         seasons.append({k: v for k, v in meta.items() if k != 'teams'})
         used.update(d['meta']['teams'])
 
-    # fixed chart domains per measure, so dots move meaningfully between seasons: every qualified season fits;
-    # part-timers below the 1st percentile of 100+ PA seasons are pinned to the left edge
+    # fixed chart domains per measure, so dots move meaningfully between seasons: every qualified season
+    # from all years fits; part-timers outside it are pinned to the edge by the page
     domains = {}
-    for k, vals in spread.items():
-        vals.sort()
-        lo = min(min(qspread[k]), vals[int(len(vals) * 0.01)]) - 0.004
-        hi = max(qspread[k]) + 0.006
-        domains[k] = [round(lo, 3), round(hi, 3)]
+    for k, vals in qspread.items():
+        lo, hi = min(vals), max(vals)
+        span = hi - lo
+        nd = 0 if k in ('plus', 'opsplus', 'hr', 'rbi', 're24') else 3
+        domains[k] = [round(lo - span * 0.03, nd), round(hi + span * 0.03, nd)]
 
     index = dict(seasons=seasons, domains=domains, qual_pa_per_game=QUAL_PA_PER_GAME, faint_min_pa=FAINT_MIN_PA,
                  teams={t: teams.get(t, [t, t]) for t in sorted(used)}, career_fields=CAREER_FIELDS)
