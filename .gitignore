@@ -14,3 +14,9 @@ __pycache__/
 # Private working notes (not published)
 SPEC.md
 DATA.md
+
+# Design mockup scratch files
+.mockups/
+
+# Local tool settings
+.claude/

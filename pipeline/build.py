@@ -8,7 +8,10 @@ For each season this:
   1. downloads https://www.retrosheet.org/downloads/plays/{year}plays.zip into data/raw/ (cached)
   2. computes one row per plate appearance -> data/interim/{year}.csv.gz (kept for pitcher/team versions)
   3. aggregates regular-season batting  -> docs/data/batting/{year}.json
-and finally rewrites docs/data/seasons.json and docs/data/teams.json from every season present.
+and finally rewrites, from every season file present:
+  docs/data/index.json        seasons, league totals, fixed chart domains per measure, team names
+  docs/data/careers/{x}.json  every player's season-by-season line, sharded by the first letter of his id
+Use --index-only to redo just that last step.
 
 Run from the project root. Only the standard library is used.
 """
@@ -30,6 +33,7 @@ INTERIM = ROOT / 'data' / 'interim'
 OUT = ROOT / 'docs' / 'data'
 PLAYS_URL = 'https://www.retrosheet.org/downloads/plays/{year}plays.zip'
 BIO_URL = 'https://www.retrosheet.org/downloads/biodata.zip'
+REGISTER_URL = 'https://raw.githubusercontent.com/chadwickbureau/register/master/data/people-{h}.csv'
 BASE = {'B': 0, '1': 1, '2': 2, '3': 3, 'H': 4}
 ADV_RE = re.compile(r'([B123])([-X])([123H])(.*)')
 
@@ -41,6 +45,7 @@ BATTING_FIELDS = [
     'run_cap', 'run_poss',    # runners' bases advanced / possible
     'err', 'odd', 'iw',       # flags: error-gained bases, dropped-3rd-strike/interference PAs, intentional walks
     'xtra',                   # runner bases from a steal/WP/PB on the final pitch (excluded from cap, tracked)
+    'mlbam',                  # MLB Advanced Media id (for headshots), from the Chadwick register; '' if unknown
 ]
 PA_FIELDS = ['gid', 'date', 'gametype', 'inning', 'top_bot', 'batter', 'pitcher', 'batteam', 'pitteam',
              'outs_pre', 'b1', 'b2', 'b3', 'event', 'possible', 'captured', 'bat_cap', 'run_cap',
@@ -209,7 +214,7 @@ def pa_record(r, stats, game_over=False):
 
 # ---------------------------------------------------------------- season build
 
-def build_season(year, names, include_deduced):
+def build_season(year, names, mlbam, include_deduced):
     zpath = fetch(PLAYS_URL.format(year=year), RAW / f'{year}plays.zip')
     rows = list(read_zip_csv(zpath, 'plays'))
     deduced = {r['gid'] for r in rows if r['pbp'] != 'full'}
@@ -259,7 +264,7 @@ def build_season(year, names, include_deduced):
     for pid, a in agg.items():
         out_rows.append([pid, names.get(pid, pid), '/'.join(a['teams']), a['pa'], a['cap'], a['poss'],
                          round(a['ratio_sum'], 4), a['bat_cap'], a['run_cap'], a['run_poss'],
-                         a['err'], a['odd'], a['iw'], a['xtra']])
+                         a['err'], a['odd'], a['iw'], a['xtra'], mlbam.get(pid, '')])
     out_rows.sort(key=lambda x: -x[3])
     reg = [x for x in recs if x['gametype'] == 'regular']
     meta = dict(
@@ -282,44 +287,124 @@ def build_season(year, names, include_deduced):
 def load_bio():
     zpath = fetch(BIO_URL, RAW / 'biodata.zip')
     names = {r['id']: f"{r['usename']} {r['lastname']}".strip() for r in read_zip_csv(zpath, 'biofile')}
-    teams = {r['team']: f"{r['city']} {r['nickname']}".strip() for r in read_zip_csv(zpath, 'teams')}
+    teams = {r['team']: [r['city'], r['nickname']] for r in read_zip_csv(zpath, 'teams')}
     return names, teams
+
+
+def load_register():
+    """Retrosheet id -> MLBAM id, from the Chadwick Bureau register (16 CSV shards)."""
+    out = {}
+    for h in '0123456789abcdef':
+        path = fetch(REGISTER_URL.format(h=h), RAW / 'register' / f'people-{h}.csv')
+        with open(path, newline='', encoding='utf-8') as f:
+            for r in csv.DictReader(f):
+                if r['key_retro'] and r['key_mlbam']:
+                    out[r['key_retro']] = r['key_mlbam']
+    return out
+
+
+CAREER_FIELDS = ['year', 'teams', 'pa', 'cap', 'poss', 'ratio_sum', 'bat_cap', 'run_cap', 'run_poss',
+                 'err', 'odd', 'iw', 'xtra', 'rank', 'of']
+QUAL_PA_PER_GAME = 3.1
+FAINT_MIN_PA = 100
+
+
+def measures(r):
+    """The four measures for a batting row (dict)."""
+    return dict(cap=r['cap'] / r['poss'], per=r['ratio_sum'] / r['pa'], own=r['bat_cap'] / (4 * r['pa']),
+                run=(r['run_cap'] / r['run_poss']) if r['run_poss'] else 0.0)
 
 
 def write_index(teams):
     seasons, used = [], set()
+    careers = collections.defaultdict(dict)
+    spread = collections.defaultdict(list)
+    qspread = collections.defaultdict(list)
     for p in sorted((OUT / 'batting').glob('*.json')):
-        meta = json.loads(p.read_text())['meta']
-        seasons.append(meta)
-        used.update(meta['teams'])
-    with open(OUT / 'seasons.json', 'w') as f:
-        json.dump(seasons, f, separators=(',', ':'))
-    with open(OUT / 'teams.json', 'w') as f:
-        json.dump({t: teams.get(t, t) for t in sorted(used)}, f, separators=(',', ':'))
+        d = json.loads(p.read_text())
+        meta, fields = d['meta'], d['fields']
+        rows = [dict(zip(fields, x)) for x in d['rows']]
+        qual_pa = QUAL_PA_PER_GAME * meta['team_games']
+        qual = sorted((r for r in rows if r['pa'] >= qual_pa), key=lambda r: -measures(r)['cap'])
+        rank = {}
+        for i, r in enumerate(qual):
+            same = i and measures(qual[i - 1])['cap'] == measures(r)['cap']
+            rank[r['id']] = rank[qual[i - 1]['id']] if same else i + 1
+        for r in rows:
+            if r['pa'] >= FAINT_MIN_PA:
+                for k, v in measures(r).items():
+                    spread[k].append(v)
+                    if r['pa'] >= qual_pa:
+                        qspread[k].append(v)
+            c = careers[r['id']].setdefault('s', [])
+            careers[r['id']]['n'] = r['name']
+            careers[r['id']]['m'] = r.get('mlbam', '')
+            c.append([meta['year'], r['teams'], r['pa'], r['cap'], r['poss'], r['ratio_sum'], r['bat_cap'],
+                      r['run_cap'], r['run_poss'], r['err'], r['odd'], r['iw'], r['xtra'],
+                      rank.get(r['id']), len(qual)])
+        tot = {k: sum(r[k] for r in rows) for k in ('pa', 'cap', 'poss', 'ratio_sum', 'bat_cap', 'run_cap', 'run_poss')}
+        league = dict(cap=tot['cap'] / tot['poss'], per=tot['ratio_sum'] / tot['pa'],
+                      own=tot['bat_cap'] / (4 * tot['pa']), run=tot['run_cap'] / tot['run_poss'])
+        meta = dict(meta, qualified=len(qual), qual_pa=round(qual_pa),
+                    league={k: round(v, 5) for k, v in league.items()})
+        seasons.append({k: v for k, v in meta.items() if k != 'teams'})
+        used.update(d['meta']['teams'])
+
+    # fixed chart domains per measure, so dots move meaningfully between seasons: every qualified season fits;
+    # part-timers below the 1st percentile of 100+ PA seasons are pinned to the left edge
+    domains = {}
+    for k, vals in spread.items():
+        vals.sort()
+        lo = min(min(qspread[k]), vals[int(len(vals) * 0.01)]) - 0.004
+        hi = max(qspread[k]) + 0.006
+        domains[k] = [round(lo, 3), round(hi, 3)]
+
+    index = dict(seasons=seasons, domains=domains, qual_pa_per_game=QUAL_PA_PER_GAME, faint_min_pa=FAINT_MIN_PA,
+                 teams={t: teams.get(t, [t, t]) for t in sorted(used)}, career_fields=CAREER_FIELDS)
+    with open(OUT / 'index.json', 'w') as f:
+        json.dump(index, f, separators=(',', ':'))
+    shards = collections.defaultdict(dict)
+    for pid, c in careers.items():
+        shards[pid[0]][pid] = c
+    cdir = OUT / 'careers'
+    cdir.mkdir(parents=True, exist_ok=True)
+    for old in cdir.glob('*.json'):
+        old.unlink()
+    for key, players in shards.items():
+        with open(cdir / f'{key}.json', 'w') as f:
+            json.dump(players, f, separators=(',', ':'))
+    for stale in ('seasons.json', 'teams.json'):
+        (OUT / stale).unlink(missing_ok=True)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--start', type=int, required=True)
-    ap.add_argument('--end', type=int, required=True)
+    ap.add_argument('--start', type=int)
+    ap.add_argument('--end', type=int)
+    ap.add_argument('--index-only', action='store_true', help='only rebuild index.json and careers/')
     ap.add_argument('--include-deduced', action='store_true',
                     help='include games Retrosheet reconstructed from box scores (excluded by default)')
     args = ap.parse_args()
 
     names, teams = load_bio()
-    total = dict(checked=0, mismatch=0)
-    for year in range(args.start, args.end + 1):
-        meta, stats = build_season(year, names, args.include_deduced)
-        total['checked'] += stats['checked']
-        total['mismatch'] += stats['mismatch']
-        rate = stats['mismatch'] / max(1, stats['checked'])
-        print(f"{year}: {meta['pa']:>6} PA  league {meta['league_cap'] / meta['league_poss']:.3f}  "
-              f"team games {meta['team_games']:>3}  deduced {meta['deduced_games']:>3}  "
-              f"parser mismatch {stats['mismatch']} ({rate:.4%})", flush=True)
-        for ex in stats['examples'][:2]:
-            print('    e.g.', ex)
+    if not args.index_only:
+        if args.start is None or args.end is None:
+            ap.error('--start and --end are required unless --index-only')
+        mlbam = load_register()
+        total = dict(checked=0, mismatch=0)
+        for year in range(args.start, args.end + 1):
+            meta, stats = build_season(year, names, mlbam, args.include_deduced)
+            total['checked'] += stats['checked']
+            total['mismatch'] += stats['mismatch']
+            rate = stats['mismatch'] / max(1, stats['checked'])
+            print(f"{year}: {meta['pa']:>6} PA  league {meta['league_cap'] / meta['league_poss']:.3f}  "
+                  f"team games {meta['team_games']:>3}  deduced {meta['deduced_games']:>3}  "
+                  f"parser mismatch {stats['mismatch']} ({rate:.4%})", flush=True)
+            for ex in stats['examples'][:2]:
+                print('    e.g.', ex)
+        print(f"parser cross-check: {total['mismatch']} of {total['checked']} player-moves disagree")
     write_index(teams)
-    print(f"done. parser cross-check: {total['mismatch']} of {total['checked']} player-moves disagree")
+    print('index and careers written')
 
 
 if __name__ == '__main__':

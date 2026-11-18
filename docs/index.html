@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bases Captured</title>
+  <meta name="description" content="Every plate appearance leaves bases on the table. Who takes the most of them? A just-for-fun MLB stat, 1975–2025.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Bases Captured">
+  <meta property="og:description" content="Every plate appearance leaves bases on the table. Who takes the most of them? A just-for-fun MLB stat, 1975–2025.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 30 16 16 30 2 16Z' fill='%23f99d1b' stroke='%23064f6e' stroke-width='3'/%3E%3C/svg%3E">
+  <script>
+    // set the theme before first paint: saved choice, else the device setting
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('bc-theme'); } catch (e) {}
+      if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@500;600;700;800;900&family=Roboto+Slab:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://img.mlbstatic.com">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <div class="brand">
+        <h1 class="title"><span>Bases</span> <span class="title-hot">captured</span></h1>
+        <p class="tagline">Every plate appearance leaves bases on the table. Who takes the most of them?</p>
+      </div>
+      <div class="season-head">
+        <output class="year" id="year" aria-live="polite">2025</output>
+        <div class="head-buttons">
+          <button class="btn btn-solid" id="play" type="button" aria-pressed="false">
+            <svg class="icon icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5 20 12 7 19.5Z"/></svg>
+            <svg class="icon icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+            <span class="play-label">Play 1975 → 2025</span>
+          </button>
+          <button class="btn" id="how-open" type="button">How it works</button>
+          <button class="btn btn-icon" id="theme" type="button" aria-label="Switch to dark theme">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <section class="controls" aria-label="Season and measure">
+      <div class="control-row">
+        <label class="slider-label" for="season">Season</label>
+        <input id="season" type="range" min="1975" max="2025" step="1" value="2025">
+        <span class="range-ends"><span id="first-year">1975</span>–<span id="last-year">2025</span></span>
+      </div>
+      <div class="control-row">
+        <div class="metrics" role="group" aria-label="Measure" id="metrics"></div>
+        <span class="spacer"></span>
+        <label class="check"><input type="checkbox" id="faint"> Add part-timers (100+ PA)</label>
+        <form class="search" id="search" role="search">
+          <label class="visually-hidden" for="search-input">Find a player this season</label>
+          <input id="search-input" list="names" placeholder="Find a player" autocomplete="off">
+          <datalist id="names"></datalist>
+        </form>
+      </div>
+    </section>
+
+    <div class="main" id="main">
+      <div class="main-col">
+        <figure class="chart-card">
+          <figcaption class="chart-caption">
+            <span id="chart-count">Qualified hitters</span>
+            <span class="hint hint-mouse">Hover a dot to see who it is. Click to keep them.</span>
+            <span class="hint hint-touch">Tap a dot to see who it is.</span>
+          </figcaption>
+          <div class="swarm" id="swarm" role="img" aria-label="Dot plot of hitters by the chosen measure"></div>
+          <div class="axis" id="axis" aria-hidden="true"></div>
+        </figure>
+
+        <section class="board" aria-label="Leaderboard">
+          <div class="table-wrap">
+            <table class="table" id="table">
+              <thead><tr id="thead"></tr></thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+          <button class="btn more" id="more" type="button">Show everyone</button>
+        </section>
+      </div>
+
+      <aside class="panel" id="panel" aria-label="Player details" hidden></aside>
+    </div>
+
+    <footer class="footer">
+      <p>Just for fun, not a serious stat: it ignores who's pitching, the park, the score and plenty more.</p>
+      <p>The information used here was obtained free of charge from and is copyrighted by Retrosheet. Interested parties may contact Retrosheet at 20 Sunset Rd., Newark, DE 19711.</p>
+      <p>Player headshots load from MLB's image server and belong to MLB. Player IDs are matched with the Chadwick Bureau register.</p>
+    </footer>
+  </div>
+
+  <div class="tooltip" id="tip" role="status" hidden></div>
+  <div class="popover" id="pop" role="tooltip" hidden></div>
+
+  <dialog class="how" id="how" aria-labelledby="how-title">
+    <form method="dialog" class="how-close-row"><button class="btn btn-icon" aria-label="Close">×</button></form>
+    <h2 id="how-title">How it works</h2>
+    <p class="how-lead">Every plate appearance starts with bases up for grabs: four for the batter (all the way home) and, for each runner, the bases left before he scores. The stat is how many of them the play actually took.</p>
+    <div class="how-example">
+      <svg class="diamond" role="img" aria-label="Diamond: the batter takes one of his four bases; the runner on first takes two of his three. Three of seven." viewBox="0 0 220 190">
+        <path class="d-outline" d="M110 172 192 92 110 12 28 92Z"/>
+        <path class="d-batter" d="M110 172 192 92"/>
+        <path class="d-runner" d="M192 92 110 12 28 92"/>
+        <rect class="d-base" x="183" y="83" width="18" height="18" transform="rotate(45 192 92)"/>
+        <rect class="d-base" x="101" y="3" width="18" height="18" transform="rotate(45 110 12)"/>
+        <rect class="d-base d-base-on" x="19" y="83" width="18" height="18" transform="rotate(45 28 92)"/>
+        <path class="d-plate" d="M100 164h20v8l-10 10-10-10Z"/>
+      </svg>
+      <div>
+        <p class="how-case">Runner on first. A single sends him to third.</p>
+        <p>The batter takes <strong>1</strong> of his 4 bases. The runner takes <strong>2</strong> of his 3. That plate appearance captured <strong>3 of 7</strong>.</p>
+        <p>A solo home run is 4 of 4. A grand slam is 10 of 10. A strikeout with the bases loaded is 0 of 10.</p>
+      </div>
+    </div>
+    <h3>The measures</h3>
+    <dl class="how-measures" id="how-measures"></dl>
+    <h3>The fine print</h3>
+    <ul class="how-rules">
+      <li>Only the play that ends the plate appearance counts. Steals, wild pitches and pickoffs before it don't.</li>
+      <li>Runners count from where they stand when that last pitch is thrown.</li>
+      <li>A runner thrown out still keeps the bases he reached safely first.</li>
+      <li>Bases taken on errors, dropped third strikes and catcher's interference count, and the player panel says how many.</li>
+      <li>Every plate appearance counts, walks and sacrifices included. Regular season only.</li>
+      <li>Qualified hitters have 3.1 plate appearances per team game, the same line as the batting title.</li>
+    </ul>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
