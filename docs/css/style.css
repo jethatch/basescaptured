@@ -11,6 +11,7 @@
   --ink: #064f6e;
   --display: #064f6e;
   --accent: #f99d1b;          /* fills, lines, rings; never small text */
+  --focus: #064f6e;
   --card: rgba(255, 255, 255, 0.45);
   --line: rgba(6, 79, 110, 0.22);
   --rule: #064f6e;
@@ -36,6 +37,7 @@
     --ink: #f5b070;
     --display: #f3a257;
     --accent: #f68c50;
+    --focus: #f68c50;
     --card: rgba(6, 79, 110, 0.4);
     --line: rgba(245, 176, 112, 0.22);
     --rule: #f3a257;
@@ -58,6 +60,7 @@
   --ink: #f5b070;
   --display: #f3a257;
   --accent: #f68c50;
+  --focus: #f68c50;
   --card: rgba(6, 79, 110, 0.4);
   --line: rgba(245, 176, 112, 0.22);
   --rule: #f3a257;
@@ -89,7 +92,9 @@ body {
 h1, h2, h3, p { margin: 0; }
 a { color: inherit; text-decoration-color: var(--accent); text-underline-offset: 2px; }
 button, input, select { font: inherit; color: inherit; }
-:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.noscript { padding: 24px; font-size: 18px; }
+.badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; font: 700 11px var(--font-display); background: var(--card); box-shadow: inset 0 0 0 1px var(--rule); white-space: nowrap; }
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap;
@@ -377,7 +382,7 @@ button, input, select { font: inherit; color: inherit; }
   min-height: 40px; padding: 0 14px; border-radius: 999px; border: 2px solid var(--rule);
   background: transparent; font: 800 14px var(--font-display); cursor: pointer;
 }
-.tabs button[aria-selected="true"] { background: var(--sel-bg); color: var(--sel-ink); border-color: var(--sel-bg); }
+.tabs button[aria-pressed="true"] { background: var(--sel-bg); color: var(--sel-ink); border-color: var(--sel-bg); }
 .alltime { width: 100%; display: flex; flex-direction: column; gap: 10px; align-items: center; }
 .alltime-note { align-self: flex-start; font-size: 13px; }
 .thumb { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; object-position: top; background: var(--card); border: 2px solid var(--rule); vertical-align: middle; margin-right: 10px; flex: none; }
@@ -533,12 +538,18 @@ button, input, select { font: inherit; color: inherit; }
 
 /* ---------------------------------------------------------------- footer */
 
-.footer { border-top: 2px solid var(--rule); padding-top: 16px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.footer { border-top: 2px solid var(--rule); padding-top: 16px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.footer .credit { font-size: 14px; font-weight: 700; }
 
 /* ---------------------------------------------------------------- narrow screens */
 
+.panel-expand { display: none; }
 @media (max-width: 900px) {
   .main.has-panel { grid-template-columns: minmax(0, 1fr); }
+  .panel-expand { display: inline-flex; width: 100%; }
+  /* the phone sheet starts small so the chart stays visible; "Show details" opens the rest */
+  .panel:not(.open) > :not(.panel-head):not(.panel-big):not(.panel-expand) { display: none; }
+  .panel:not(.open) .panel-big .val { font-size: 32px; }
   .panel {
     position: fixed;
     left: 8px;

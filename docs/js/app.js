@@ -186,7 +186,7 @@ async function render() {
   showDisagreements(s, metric, cmpKey);
   board.render({ rows: s.rows, ranks: seasonRanks(s, state.sortKey), sortKey: state.sortKey, selected: state.selected, faint: state.faint, compare: cmpKey });
   const seasonView = state.view === 'season';
-  for (const b of document.querySelectorAll('#tabs [data-view]')) b.setAttribute('aria-selected', b.dataset.view === state.view);
+  for (const b of document.querySelectorAll('#tabs [data-view]')) b.setAttribute('aria-pressed', b.dataset.view === state.view);
   $('season-table').hidden = !seasonView;
   if (!seasonView) $('more').hidden = true;
   $('alltime').hidden = seasonView;
@@ -234,7 +234,9 @@ function showDisagreements(s, metric, cmpKey) {
   gaps.sort((x, y) => y.gap - x.gap);
   const mine = METRIC[metric].label;
   const theirs = COMPARE_BY[cmpKey].label;
-  const item = (g) => `<li><button type="button" data-id="${g.r.id}">${esc(g.r.name)}</button> ${ordinal(g.ra)} vs ${ordinal(g.rb)}</li>`;
+  const short = (k) => (METRIC[k] ? METRIC[k].short : COMPARE_BY[k].short || COMPARE_BY[k].label);
+  const item = (g) => `<li><button type="button" data-id="${g.r.id}">${esc(g.r.name)}</button>
+    ${ordinal(g.ra)} in ${esc(short(metric))}, ${ordinal(g.rb)} in ${esc(short(cmpKey))}</li>`;
   box.innerHTML = `<div><h3>${esc(mine)} likes them more</h3><ol>${gaps.slice(0, 3).map(item).join('')}</ol></div>
     <div><h3>${esc(theirs)} likes them more</h3><ol>${gaps.slice(-3).reverse().map(item).join('')}</ol></div>`;
   box.hidden = false;
@@ -373,8 +375,13 @@ document.addEventListener('click', (e) => {
 
 // ------------------------------------------------------------------ search
 
+// two players can share a name in a season (e.g. two Brian Hunters); add the team to tell them apart
+function searchLabel(r, rows) {
+  return rows.some((x) => x !== r && x.name === r.name) ? `${r.name} (${r.team})` : r.name;
+}
+
 function fillNames(rows) {
-  const names = rows.filter((r) => r.qualified || (state.faint && r.faintOk)).map((r) => r.name).sort();
+  const names = rows.filter((r) => r.qualified || (state.faint && r.faintOk)).map((r) => searchLabel(r, rows)).sort();
   const key = state.year + ':' + state.faint;
   const dl = $('names');
   if (dl.dataset.key === key) return;
@@ -389,7 +396,9 @@ function setupSearch() {
     const q = input.value.trim().toLowerCase();
     if (!q) return;
     const pool = season.rows.filter((r) => r.pa > 0);
-    const hit = pool.find((r) => r.name.toLowerCase() === q) || pool.find((r) => r.name.toLowerCase().includes(q));
+    const label = (r) => searchLabel(r, season.rows).toLowerCase();
+    const hit = pool.find((r) => label(r) === q) || pool.find((r) => r.name.toLowerCase() === q)
+      || pool.find((r) => label(r).includes(q));
     if (!hit) {
       input.setCustomValidity(`No one by that name batted in ${state.year}`);
       input.reportValidity();

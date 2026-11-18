@@ -21,6 +21,7 @@ import csv
 import gzip
 import io
 import json
+import math
 import re
 import sys
 import urllib.request
@@ -297,8 +298,12 @@ def build_season(year, names, mlbam, include_deduced):
         for k in ('ab', 'h', 'tb', 'bb', 'hbp', 'sf', 'hr', 'rbi', 're24'):
             a[k] += rec[k]
 
+    # centre RE24 so the league comes out at 0 (baserunning plays between pitches aren't credited to hitters)
+    reg_pa = [x for x in recs if x['gametype'] == 'regular']
+    re24_mean = sum(x['re24'] for x in reg_pa) / max(1, len(reg_pa))
     out_rows = []
     for pid, a in agg.items():
+        a['re24'] -= re24_mean * a['pa']
         out_rows.append([pid, names.get(pid, pid), '/'.join(a['teams']), a['pa'], a['cap'], a['poss'],
                          round(a['ratio_sum'], 4), a['bat_cap'], a['run_cap'], a['run_poss'],
                          a['err'], a['odd'], a['iw'], a['xtra'], mlbam.get(pid, ''),
@@ -361,7 +366,11 @@ def traditional(r):
 
 def load_bio():
     zpath = fetch(BIO_URL, RAW / 'biodata.zip')
-    names = {r['id']: f"{r['usename']} {r['lastname']}".strip() for r in read_zip_csv(zpath, 'biofile')}
+    names = {}
+    for r in read_zip_csv(zpath, 'biofile'):
+        # Retrosheet keeps Jr./Sr./II in the full name only
+        m = re.search(r'\b(Jr\.|Sr\.|II|III|IV)$', r['fullname'].strip())
+        names[r['id']] = f"{r['usename']} {r['lastname']}{' ' + m.group(1) if m else ''}".strip()
     teams = {r['team']: [r['city'], r['nickname']] for r in read_zip_csv(zpath, 'teams')}
     return names, teams
 
@@ -385,7 +394,8 @@ METRIC_KEYS = ('cap', 'per', 'own', 'run', 'plus')
 
 def rank_map(qual, key):
     """Rank qualified rows by one measure; ties share a rank at the 3 decimals the page shows."""
-    vals = {r['id']: round(measures(r)[key], 0 if key == 'plus' else 3) for r in qual}
+    scale = 1 if key == 'plus' else 1000  # round half up, exactly as the page does (Math.round)
+    vals = {r['id']: math.floor(measures(r)[key] * scale + 0.5) for r in qual}
     order = sorted(vals.values(), reverse=True)
     first = {}
     for i, v in enumerate(order):
@@ -501,14 +511,13 @@ def write_alltime(careers):
         vals = dict(cap=tot['cap'] / tot['poss'], own=tot['bat_cap'] / (4 * tot['pa']),
                     run=tot['run_cap'] / tot['run_poss'] if tot['run_poss'] else 0.0,
                     plus=100 * tot['cap'] / tot['exp'] if tot['exp'] else 0.0)
-        teams = []
+        teams = {}  # team -> last season with them, so renamed franchises get the right name
         for r in rows:
             for t in r['teams'].split('/'):
-                if t not in teams:
-                    teams.append(t)
+                teams[t] = r['year']
         for k in ALLTIME_KEYS:
             best = max(qual or rows, key=lambda r: measures(r)[k])
-            car[k].append((vals[k], [pid, c['n'], c['m'], rows[0]['year'], rows[-1]['year'], pa, '/'.join(teams), best['year']]))
+            car[k].append((vals[k], [pid, c['n'], c['m'], rows[0]['year'], rows[-1]['year'], pa, '/'.join(f'{t}@{y}' for t, y in teams.items()), best['year']]))
 
     def top(items, nd):
         items.sort(key=lambda x: -x[0])

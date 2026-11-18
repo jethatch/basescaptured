@@ -1,6 +1,8 @@
 // All-time lists: the best single seasons and the best careers, 1975 on, in the chosen measure.
 
-import { METRIC, fmtv, getJSON, headshot, teamNames, num } from './data.js';
+import { METRIC, fmtv, getJSON, headshot, teamNames, teamName, num } from './data.js';
+
+const SHORT = { 1981: 'strike-shortened', 1994: 'strike-shortened', 1995: '144 games', 2020: '60 games' };
 
 const LIMIT = 25;
 
@@ -45,8 +47,8 @@ export class AllTime {
         <td class="rank">${i + 1}</td>
         <td><span class="who"><img class="thumb" src="${headshot(r.mlbam, 64)}" alt="" loading="lazy">
           <span class="player-cell"><button class="player-btn" type="button">${esc(r.name)}</button>
-          <span class="player-team">${esc(teamNames(index, r.teams, isSeasons ? r.year : r.last))}</span></span></span></td>
-        <td>${when}</td>
+          <span class="player-team">${esc(isSeasons ? teamNames(index, r.teams, r.year) : careerTeams(index, r.teams))}</span></span></span></td>
+        <td>${when}${isSeasons && SHORT[r.year] ? ` <span class="badge" title="Short season: fewer plate appearances needed to qualify">${SHORT[r.year]}</span>` : ''}</td>
         <td class="sorted">${fmtv(metric, r.value)}</td>
         <td>${num(r.pa)}</td>
       </tr>`;
@@ -60,6 +62,14 @@ export class AllTime {
         <tbody>${body}</tbody></table></div>
       ${rows.length > LIMIT ? `<button class="btn more" type="button" data-more>${this.expanded ? 'Show top 25' : `Show all ${rows.length}`}</button>` : ''}`;
   }
+}
+
+// 'CLE@2021/NYN@2025': each team named as of his last season with it
+function careerTeams(index, s) {
+  return s.split('/').map((x) => {
+    const [code, year] = x.split('@');
+    return teamName(index, code, +year);
+  }).join(' / ');
 }
 
 function esc(s) {

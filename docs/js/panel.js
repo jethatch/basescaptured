@@ -10,9 +10,14 @@ export class Panel {
     this.el = el;
     this.onClose = onClose;
     this.full = false;
+    this.open = false; // on phones the sheet starts small: name and headline number only
     this.token = 0;
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-close]')) this.onClose();
+      if (e.target.closest('[data-expand]')) {
+        this.open = !this.open;
+        if (this.last) this.paint(this.last);
+      }
       if (e.target.closest('[data-career]')) {
         this.full = !this.full;
         if (this.last) this.paint(this.last);
@@ -32,6 +37,7 @@ export class Panel {
     this.el.hidden = false;
     if (wasHidden || !this.last || this.last.id !== id) {
       this.el.innerHTML = `<div class="panel-label">Loading…</div>`;
+      this.open = false;
     }
     const career = await loadCareer(index, id);
     if (token !== this.token) return;
@@ -78,7 +84,10 @@ export class Panel {
 
     const careerHtml = this.full ? fullCareer(index, career, metric, leagueBy) : '';
 
-    this.el.innerHTML = `${head}${now}${compare}
+    this.el.classList.toggle('open', this.open);
+    const expand = `<button class="btn panel-expand" type="button" data-expand aria-expanded="${this.open}">
+      ${this.open ? 'Hide details ▾' : 'Show details ▴'}</button>`;
+    this.el.innerHTML = `${head}${now}${expand}${compare}
       <div>
         <div class="panel-label">${M.short} by season · dashed line is the league · hollow = not qualified</div>
         ${spark}

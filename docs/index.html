@@ -6,6 +6,7 @@
   <title>Bases Captured</title>
   <meta name="description" content="Every plate appearance leaves bases on the table. Who takes the most of them? A just-for-fun MLB stat, 1975–2025.">
   <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Bases Captured">
   <meta property="og:title" content="Bases Captured">
   <meta property="og:description" content="Every plate appearance leaves bases on the table. Who takes the most of them? A just-for-fun MLB stat, 1975–2025.">
   <meta property="og:url" content="https://jethatch.github.io/basescaptured/">
@@ -25,11 +26,12 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@500;600;700;800;900&family=Roboto+Slab:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@600;700;800;900&family=Roboto+Slab:wght@400;700&display=swap" rel="stylesheet">
   <link rel="preconnect" href="https://img.mlbstatic.com">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <noscript><p class="noscript">Bases Captured needs JavaScript to draw its charts and tables.</p></noscript>
   <div class="page">
     <header class="masthead">
       <div class="brand">
@@ -80,17 +82,17 @@
             <span class="hint hint-mouse">Hover a dot to see who it is. Click to keep them.</span>
             <span class="hint hint-touch">Tap a dot to see who it is.</span>
           </figcaption>
-          <p class="visually-hidden">Each dot is one hitter, placed by the chosen measure; dots stack where values are close. The leaderboard below lists the same players.</p>
+          <p class="visually-hidden">Each dot is one hitter, placed by the chosen measure; dots stack where values are close. Only the five leaders' faces are keyboard stops here; the leaderboard below lists every player and is the easier way through with a keyboard.</p>
           <div class="swarm" id="swarm" role="group" aria-label="Chart of hitters by the chosen measure"></div>
           <div class="axis" id="axis" aria-hidden="true"></div>
           <div class="disagree" id="disagree" hidden></div>
         </figure>
 
         <section class="board" aria-label="Leaderboard">
-          <div class="tabs" id="tabs" role="tablist" aria-label="Leaderboard view">
-            <button type="button" role="tab" data-view="season" aria-selected="true">This season</button>
-            <button type="button" role="tab" data-view="seasons" aria-selected="false">All-time seasons</button>
-            <button type="button" role="tab" data-view="careers" aria-selected="false">All-time careers</button>
+          <div class="tabs" id="tabs" role="group" aria-label="Leaderboard view">
+            <button type="button" data-view="season" aria-pressed="true">This season</button>
+            <button type="button" data-view="seasons" aria-pressed="false">All-time seasons</button>
+            <button type="button" data-view="careers" aria-pressed="false">All-time careers</button>
           </div>
           <div class="alltime" id="alltime" hidden></div>
           <div class="table-wrap" id="season-table">
@@ -108,8 +110,9 @@
 
     <footer class="footer">
       <p>Just for fun, not a serious stat: it ignores who's pitching, the park, the score and plenty more.</p>
-      <p>The information used here was obtained free of charge from and is copyrighted by Retrosheet. Interested parties may contact Retrosheet at 20 Sunset Rd., Newark, DE 19711.</p>
-      <p>Player headshots load from MLB's image server and belong to MLB. Player IDs are matched with the Chadwick Bureau register.</p>
+      <p class="credit">The information used here was obtained free of charge from and is copyrighted by <a href="https://www.retrosheet.org/">Retrosheet</a>. Interested parties may contact Retrosheet at 20 Sunset Rd., Newark, DE 19711.</p>
+      <p>Player IDs are matched with the <a href="https://github.com/chadwickbureau/register">Chadwick Baseball Bureau register</a>. Headshots load from MLB's image server and belong to MLB.</p>
+      <p>Not affiliated with or endorsed by Major League Baseball or any team. <a href="https://github.com/jethatch/basescaptured">Source and method on GitHub</a>.</p>
     </footer>
   </div>
 
@@ -148,6 +151,7 @@
       <li>That has quirks: a sacrifice bunt that moves a runner up, or an intentional walk with runners on, often scores better than an average plate appearance, while an intentional walk with the bases empty pulls a great hitter down a little.</li>
       <li>Qualified hitters have 3.1 plate appearances per team game, the same line as the batting title.</li>
     </ul>
+    <p class="how-credit">Play-by-play from <a href="https://www.retrosheet.org/">Retrosheet</a>; player IDs from the <a href="https://github.com/chadwickbureau/register">Chadwick Bureau</a>. See the footer for the full notice.</p>
   </dialog>
 
   <script type="module" src="js/app.js"></script>

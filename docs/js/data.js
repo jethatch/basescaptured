@@ -25,7 +25,7 @@ export const METRICS = [
     key: 'plus',
     label: 'Captured+',
     short: 'Captured+',
-    help: 'Bases captured compared with an average hitter in the same spots that season: same runners on, same number of outs. 100 is average; 120 means 20% more. Evens out lineup spot and era.',
+    help: 'Bases captured compared with what an average hitter took that season in the same situations: the same runners on base and the same number of outs. 100 is average; 120 means 20% more. It adjusts for chances and era, not for park or pitcher.',
   },
   {
     key: 'per',
@@ -57,7 +57,7 @@ export const COMPARE = [
   { key: 'avg', label: 'Batting average', short: 'AVG', help: 'Hits per at-bat.' },
   { key: 'hr', label: 'Home runs', short: 'HR', help: 'Home runs.' },
   { key: 'rbi', label: 'RBI', help: 'Runs batted in.' },
-  { key: 're24', label: 'RE24', help: 'Runs he added compared with what the base-out situations he came up in would normally produce. Also accounts for who was on and how many were out.' },
+  { key: 're24', label: 'RE24', help: 'Runs he added compared with what the base-out situations he came up in would normally produce. 0 is league average.' },
 ];
 export const COMPARE_BY = Object.fromEntries(COMPARE.map((c) => [c.key, c]));
 const INT_KEYS = new Set(['plus', 'opsplus', 'hr', 'rbi']);
